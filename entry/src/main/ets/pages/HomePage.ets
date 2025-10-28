@@ -273,7 +273,7 @@ struct HomePage {
                   .onClick(() => {
                     if (this.isEditing) {
                       this.pickImageFromGallery()
-
+//不会做相册选择图片
 
                     }
                   })
@@ -354,6 +354,9 @@ struct HomePage {
 
               Column() {
                 Text("进吧").fontSize(27).fontColor(Color.Black)
+                  .onClick(() => {
+                    this.currentTab = 'forum'
+                  })
               }
 
               Column() {
@@ -365,23 +368,101 @@ struct HomePage {
               }
 
               Column() {
-                Text("我的").fontSize(27).fontColor(Color.Black)
+                Text("我的").fontSize(27).fontColor(Color.Blue)
                   .onClick(() => {
                     this.currentTab = 'profile'
                   })
               }
             }
             .width('100%')
-            .height(80)
+            .height(75)
             .backgroundColor('#F5F5F5')
             .justifyContent(FlexAlign.SpaceAround)
-            .padding({ bottom: 1 })
+
           }
         }
+        else if (this.currentTab === 'forum') {
+          Column() {
+            Text("所有的吧")
+              .fontSize(27)
+              .fontColor(Color.Black)
+              .margin({ top: 10, bottom: 10 })
+
+            // 使用 Scroll 包裹整个吧列表
+            // 使用 Scroll 包裹整个吧列表
+            Scroll() {
+              Column({ space: 16 }) {
+                ForEach(this.forums, (forum: ForumItem) => {
+                  Row() {
+                    // 吧头像
+                    Image(forum.icon)
+                      .width(70)
+                      .height(70)
+                      .borderRadius(12)
+                      .margin({ right: 12 })
+
+                    // 吧文字信息
+                    Column({ space: 4 }) {
+                      Text(forum.baname)
+                        .fontSize(18)
+                        .fontColor(Color.Black)
+                        .fontWeight(FontWeight.Medium)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+                      Text(`${forum.posts} 帖子 · ${forum.members} 成员`)
+                        .fontSize(14)
+                        .fontColor('#666666')
+                    }
+                    .justifyContent(FlexAlign.Center)
+                    .alignItems(HorizontalAlign.Start)
+                    .width('100%')
+                  }
+                  .width('92%') // 👈 一行一个吧，整体更宽
+                  .height(90)
+                  .padding({ left: 12, right: 12 })
+                  .backgroundColor(Color.White)
+                  .borderRadius(14)
+                  .shadow({ radius: 3, color: '#22000000', offsetX: 0, offsetY: 2 })
+                  .onClick(() => {
+
+                    // 跳转到吧详情页逻辑
+                  })
+                })
+              }
+              .padding({ top: 10, left: 16, right: 16, bottom: 16 })
+            }
+            .width('100%')
+            .height('100%')
+            .backgroundColor('#F5F5F5')
+
+
+            // 底部导航栏
+            Row() {
+              Column() { Text("首页").fontSize(27).fontColor(Color.Black)
+                .onClick(() => this.currentTab = 'home')
+              }
+              Column() { Text("进吧").fontSize(27).fontColor(Color.Blue)
+                .onClick(() => this.currentTab = 'forum')
+              }
+              Column() { Text("发布").fontSize(27).fontColor(Color.Black) }
+              Column() { Text("消息").fontSize(27).fontColor(Color.Black) }
+              Column() { Text("我的").fontSize(27).fontColor(Color.Black)
+                .onClick(() => this.currentTab = 'profile')
+              }
+            }
+            .width('100%')
+            .height(60)
+            .backgroundColor('#F5F5F5')
+            .justifyContent(FlexAlign.SpaceAround)
+            .alignItems(VerticalAlign.Center)
+            .margin({top:75})
+          }
+        }
+
         if (this.currentTab === 'home')
           Row() {
             Column() {
-              Text("首页").fontSize(27).fontColor(Color.Black)
+              Text("首页").fontSize(27).fontColor(Color.Blue)
                 .onClick(() => {
                   this.currentTab = 'home'
                 })
@@ -389,6 +470,9 @@ struct HomePage {
 
             Column() {
               Text("进吧").fontSize(27).fontColor(Color.Black)
+                .onClick(() => {
+                  this.currentTab = 'forum'
+                })
             }
 
             Column() {
