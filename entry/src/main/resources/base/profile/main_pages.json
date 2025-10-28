@@ -1,0 +1,9 @@
+{
+  "src": [
+    "pages/WelcomePage",
+    "pages/HomePage",
+    "pages/RegisterPage",
+    "pages/LoginPage",
+    "pages/personalsetting"
+  ]
+}
