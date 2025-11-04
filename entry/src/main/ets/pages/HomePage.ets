@@ -38,6 +38,10 @@ struct HomePage {
   @State userName:string = '';
   @State headImage:string ='app.media.head';
   @State likesClicked: boolean = false;
+  @State content: string = ''
+  @State selectedBa: string = ''
+  @State selectedForum: string = ''
+
   @StorageLink('posts') posts: PostItem[] = []
 
   @State forums: ForumItem[] = [
@@ -58,6 +62,18 @@ struct HomePage {
       members: 0,
       posts: 1,
       icon: $r('app.media.bilibili')
+    },
+  {
+  baname: "动漫吧",
+  members: 0,
+  posts: 0,
+  icon: $r('app.media.dm')
+  },
+    {
+      baname: "弱智吧",
+      members: 0,
+      posts: 0,
+      icon: $r('app.media.rz')
     }
   ]
 
@@ -100,26 +116,7 @@ struct HomePage {
     }
   }
 
-  addPost() {
-    const newPost: PostItem = {
-      baname:'浙江农林大学吧',
 
-      user: `用户${this.posts.length + 1}`,
-      time: '刚刚',
-      content: `这是第${this.posts.length + 1}条帖子（来自 StorageLink）`,
-      image: 'app.media.bj2',
-      likes: 0,
-      comments: 0
-    }
-    // 在数组头部插入
-    this.posts.unshift(newPost)
-
-    try {
-      PersistentStorage.persistProp('posts',[])
-    } catch (e) {
-      console.warn('PersistentStorage.persistProp 失败：', e)
-    }
-  }
 
   build() {
     Stack() {
@@ -344,40 +341,7 @@ struct HomePage {
             .margin({ top: 30 })
 
 
-            Row() {
-              Column() {
-                Text("首页").fontSize(27).fontColor(Color.Black)
-                  .onClick(() => {
-                    this.currentTab = 'home'
-                  })
-              }
 
-              Column() {
-                Text("进吧").fontSize(27).fontColor(Color.Black)
-                  .onClick(() => {
-                    this.currentTab = 'forum'
-                  })
-              }
-
-              Column() {
-                Text("发布").fontSize(27).fontColor(Color.Black)
-              }
-
-              Column() {
-                Text("消息").fontSize(27).fontColor(Color.Black)
-              }
-
-              Column() {
-                Text("我的").fontSize(27).fontColor(Color.Blue)
-                  .onClick(() => {
-                    this.currentTab = 'profile'
-                  })
-              }
-            }
-            .width('100%')
-            .height(75)
-            .backgroundColor('#F5F5F5')
-            .justifyContent(FlexAlign.SpaceAround)
 
           }
         }
@@ -417,7 +381,7 @@ struct HomePage {
                     .alignItems(HorizontalAlign.Start)
                     .width('100%')
                   }
-                  .width('92%') // 👈 一行一个吧，整体更宽
+                  .width('92%')
                   .height(90)
                   .padding({ left: 12, right: 12 })
                   .backgroundColor(Color.White)
@@ -436,70 +400,177 @@ struct HomePage {
             .backgroundColor('#F5F5F5')
 
 
-            // 底部导航栏
-            Row() {
-              Column() { Text("首页").fontSize(27).fontColor(Color.Black)
-                .onClick(() => this.currentTab = 'home')
-              }
-              Column() { Text("进吧").fontSize(27).fontColor(Color.Blue)
-                .onClick(() => this.currentTab = 'forum')
-              }
-              Column() { Text("发布").fontSize(27).fontColor(Color.Black) }
-              Column() { Text("消息").fontSize(27).fontColor(Color.Black) }
-              Column() { Text("我的").fontSize(27).fontColor(Color.Black)
-                .onClick(() => this.currentTab = 'profile')
-              }
-            }
-            .width('100%')
-            .height(60)
-            .backgroundColor('#F5F5F5')
-            .justifyContent(FlexAlign.SpaceAround)
-            .alignItems(VerticalAlign.Center)
-            .margin({top:75})
+
           }
         }
 
-        if (this.currentTab === 'home')
-          Row() {
+
+
+        if (this.currentTab === 'post'){
+          Column({ space: 20 }) {
+            // 顶部标题
+            Text('发布帖子')
+              .fontSize(25)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(Color.Black)
+              .margin({ top: 20 })
+
+            // 内容输入框
+            TextInput({ placeholder: '请输入帖子内容...' })
+              .width('90%')
+              .height(100)
+              .border({ width: 1, color: '#CCCCCC' })
+              .padding(10)
+              .fontSize(16)
+              .onChange((val) => this.content = val)
+
+            // 选择图片区域
             Column() {
-              Text("首页").fontSize(27).fontColor(Color.Blue)
-                .onClick(() => {
-                  this.currentTab = 'home'
+              Text('+')
+                .fontSize(40)
+                .fontColor('#AAAAAA')
+            }
+
+              .width(100)
+              .height(100)
+              .border({ width: 1, color: '#CCCCCC' })
+              .borderRadius(12)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(HorizontalAlign.Center)
+              .backgroundColor('#F5F5F5')
+              .onClick(() => {
+              // 选图
+
+            })
+
+
+            // 选择的吧
+            Text('选择的吧')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(Color.Black)
+              .margin({ top: 10, bottom: 5 })
+
+            // 吧列表
+            Scroll() {
+              Row({ space: 10 }) {
+                ForEach(this.forums, (item: ForumItem) => {
+                  Column() {
+                    Image(item.icon)
+                      .width(50)
+                      .height(50)
+                      .borderRadius(25)
+                    Text(item.baname)
+                      .fontSize(14)
+                      .fontColor(Color.Black)
+                      .margin({ top: 4 })
+                  }
+                  .width(100)
+                  .height(100)
+                  .border({
+                    width: 2,
+                    color: this.selectedBa === item.baname ? '#3B82F6' : '#CCCCCC'
+                  })
+                  .borderRadius(12)
+                  .alignItems(HorizontalAlign.Center)
+                  .justifyContent(FlexAlign.Center)
+                  .onClick(() => {
+                    this.selectedBa = item.baname
+                  })
                 })
+              }.margin({ bottom: 20 })
             }
+            .scrollable(ScrollDirection.Horizontal)
+            // 发布按钮
+            Button('发布')
+              .width('90%')
+              .height(45)
+              .borderRadius(8)
+              .backgroundColor(
+                this.content.length > 0 && this.selectedBa !== ''
+                  ? '#3B82F6'
+                  : '#A0C4FF'
+              )
+              .fontColor(Color.White)
+              .fontSize(18)
+              .onClick(() => {
+                if (this.content.length === 0 || this.selectedBa === '') return
 
-            Column() {
-              Text("进吧").fontSize(27).fontColor(Color.Black)
-                .onClick(() => {
-                  this.currentTab = 'forum'
+                this.posts.push({
+                  baname: this.selectedBa,
+                  user: this.userName,
+                  time: new Date().toLocaleString(),
+                  content: this.content,
+                  image:  '',//选择图片的实现
+                  likes: 0,
+                  comments: 0
                 })
-            }
 
-            Column() {
-              Text("发布").fontSize(27).fontColor(Color.Black)
-            }
+                // 清空状态
+                this.content = ''
 
-            Column() {
-              Text("消息").fontSize(27).fontColor(Color.Black)
-            }
+                this.selectedBa = ''
 
-            Column() {
-              Text("我的").fontSize(27).fontColor(Color.Black)
-                .onClick(() => {
-                  this.currentTab = 'profile'
-                })
-            }
+              })
           }
           .width('100%')
-          .height(51)
-          .backgroundColor('#F5F5F5')
+          .alignItems(HorizontalAlign.Center)
+          .padding(20)
+        }
 
-          .justifyContent(FlexAlign.SpaceAround)
-          .padding({ top: -30 })
+
+        if (this.currentTab === 'message'){
+
+        }
+
+
+
 
       }
       .width('100%')
       .alignItems(HorizontalAlign.Center)
+
+      Row() {
+        Column() {
+          Text("首页").fontSize(27).fontColor(this.currentTab === 'home' ? '#007AFF' : Color.Black)
+            .onClick(() => {
+              this.currentTab = 'home'
+            })
+        }
+
+        Column() {
+          Text("进吧").fontSize(27).fontColor(this.currentTab === 'forum' ? '#007AFF' : Color.Black)
+            .onClick(() => {
+              this.currentTab = 'forum'
+            })
+        }
+
+        Column() {
+          Text("发布").fontSize(27).fontColor(this.currentTab === 'post' ? '#007AFF' : Color.Black)
+            .onClick(() => {
+              this.currentTab = 'post'
+            })
+        }
+
+        Column() {
+          Text("消息").fontSize(27).fontColor(this.currentTab === 'message' ? '#007AFF' : Color.Black)
+            .onClick(() => {
+              this.currentTab = 'massage'
+            })
+        }
+
+        Column() {
+          Text("我的").fontSize(27).fontColor(this.currentTab === 'profile' ? '#007AFF' : Color.Black)
+            .onClick(() => {
+              this.currentTab = 'profile'
+            })
+        }
+      }
+      .width('100%')
+      .height(70)
+      .backgroundColor('#F5F5F5')
+      .justifyContent(FlexAlign.SpaceAround)
+      .margin({top:850})
     }
     .width('100%')
     .height('80%')
