@@ -37,7 +37,7 @@ struct RegisterPage {
     const httpRequest = http.createHttp();
     try {
       const response: http.HttpResponse = await httpRequest.request(
-        "https://192.168.56.1:8080/api/register",
+        "http://10.205.218.246:8080/api/register",
         {
           method: http.RequestMethod.POST,
           header: { "Content-Type": "application/json" },
@@ -147,6 +147,18 @@ struct RegisterPage {
             .fontSize(14)
             .margin({ top: 10 })
         }
+
+        Button("已有账号？去登录")
+          .width("80%")
+          .height(40)
+          .borderRadius(12)
+          .fontColor("#007AFF")
+          .backgroundColor("#FFFFFF")
+          .border({ width: 1, color: "#007AFF" }) // 蓝色边框
+          .margin({ top: 15 })
+          .onClick(() => {
+            router.pushUrl({ url: "pages/LoginPage" });
+          });
       }
       .backgroundColor(Color.White)
       .borderRadius(20)

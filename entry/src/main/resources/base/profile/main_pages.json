@@ -1,9 +1,11 @@
 {
   "src": [
-    "pages/WelcomePage",
+    "pages/Index",
     "pages/HomePage",
     "pages/RegisterPage",
     "pages/LoginPage",
     "pages/personalsetting"
   ]
+
 }
+

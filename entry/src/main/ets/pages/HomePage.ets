@@ -3,7 +3,15 @@ import file from '@ohos.file.picker';
 import * as picker from '@ohos.file.picker';
 import photoAccessHelper from '@ohos.file.photoAccessHelper';
 import { BusinessError } from '@ohos.base';
+import { common } from '@kit.AbilityKit';
+import {loadUserInfo} from '../pages/LoginPage';
+import { saveUserName} from '../pages/LoginPage';
 import image from '@ohos.multimedia.image';
+import http from '@ohos.net.http';
+import util from '@ohos.util';
+
+
+import fs from '@ohos.file.fs';
 
 interface PostItem {
   baname:string
@@ -29,6 +37,13 @@ interface UserItem{
   fans:number,
   phone:number
 }
+
+interface UpdateNameResponse {
+  success: boolean;
+  message?: string;
+}
+
+
 
 @Entry
 @Component
@@ -115,6 +130,9 @@ struct HomePage {
       }
     }
   }
+
+
+
 
 
 
@@ -259,21 +277,27 @@ struct HomePage {
         }
         else if (this.currentTab === 'profile') {
           Column() {
-            Text("个人信息").fontSize(27).fontColor(Color.Black).margin({top:-20})
+
             Column() {
               if (this.isEditing){
-                Image($r(this.headImage))
-                  .width(100)
-                  .height(100)
-                  .borderRadius(50)
-                  .margin({ top: -190 })
-                  .onClick(() => {
-                    if (this.isEditing) {
-                      this.pickImageFromGallery()
-//不会做相册选择图片
+                Row({ space: 10 }) {  // 水平并排，间距 10
+                  Image($r(this.headImage))  // 显示当前头像（不再有 onClick）
+                    .width(100)
+                    .height(100)
+                    .borderRadius(50)
 
-                    }
-                  })
+                  Button("修改头像")  // 新按钮
+                    .width(80)
+                    .height(40)
+                    .borderRadius(8)
+                    .fontSize(10)
+                    .fontColor(Color.White)
+                    .backgroundColor("#007AFF")  // 蓝色背景，可自定义
+                    .onClick(async () => {
+                      await this.pickImageFromGallery();  // 点击调用选择函数
+                    })
+                }
+                .margin({ top: -190 })  // 整体上移
               }
               else
               {
@@ -316,9 +340,49 @@ struct HomePage {
                 .textAlign(TextAlign.Center)
 
                 .margin({ top: 20 })
-                .onClick(() => {
-                  this.isEditing = !this.isEditing
-                })
+                 .onClick(async () => {
+                   if (this.isEditing) {
+                     const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+
+                     // 使用 loadUserInfo 读取 userId（替换 AppStorage.Get）
+                     const userInfo = await loadUserInfo(currentContext);
+                     const userId: number = parseInt(userInfo.id, 10) || 0;  // 转回 number
+
+                     if (!userId) {
+                       console.error("未登录或用户ID丢失");
+                       return;
+                     }
+                     const httpRequest: http.HttpRequest = http.createHttp();
+
+                     const response = await httpRequest.request(
+                       "http://10.205.218.246:8080/api/updateName",
+                       {
+                         method: http.RequestMethod.POST,
+                         header: { "Content-Type": "application/json" },
+                         extraData: {
+                           id: String(userId),
+                           name: this.userName
+                         }
+                       }
+                     )
+                     console.log("请求参数:", JSON.stringify({ id: String(userId), name: this.userName }));
+
+                     let text = typeof response.result === "string"
+                       ? response.result
+                       : new util.TextDecoder("utf-8").decode(response.result as Uint8Array)
+
+                     const data: UpdateNameResponse = JSON.parse(text) as UpdateNameResponse;
+
+                     if (data.success) {
+                       await saveUserName(this.userName, currentContext);
+                     }
+                     console.log("返回结果:", text);
+                     httpRequest.destroy()
+                   }
+
+                   this.isEditing = !this.isEditing
+                 })
+
               Row({ space: 30}) {
                 Column() {
                   Text("关注").fontSize(16).fontColor(Color.Gray)
