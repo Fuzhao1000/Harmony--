@@ -9,7 +9,7 @@ import { saveUserName} from '../pages/LoginPage';
 import image from '@ohos.multimedia.image';
 import http from '@ohos.net.http';
 import util from '@ohos.util';
-
+import preferences from '@ohos.data.preferences'
 
 import fs from '@ohos.file.fs';
 
@@ -56,8 +56,9 @@ struct HomePage {
   @State content: string = ''
   @State selectedBa: string = ''
   @State selectedForum: string = ''
-
+  @State selectedImage: string = ''
   @StorageLink('posts') posts: PostItem[] = []
+  @State loading: boolean = false;
 
   @State forums: ForumItem[] = [
     {
@@ -115,6 +116,29 @@ struct HomePage {
     }
   }
 
+  async pickImageForPost() {
+    try {
+      const photoPicker = new photoAccessHelper.PhotoViewPicker();
+      // 打开相册，等待用户选择
+      const selectResult = await photoPicker.select({
+        MIMEType: photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE, // 仅选图片
+        maxSelectNumber: 1
+      });
+
+      if (selectResult && selectResult.photoUris.length > 0) {
+        // 获取选中图片的 URI
+        const uri = selectResult.photoUris[0];
+        console.log("选择的帖子图片地址：" + uri);
+
+        // 更新帖子图片显示
+        this.selectedImage = uri;
+      }
+    } catch (err) {
+      const error = err as BusinessError;
+      console.error(`选图失败：${error.code} - ${error.message}`);
+    }
+  }
+
   aboutToAppear() {
     if (!this.posts || this.posts.length === 0) {
       this.posts = [
@@ -131,10 +155,106 @@ struct HomePage {
     }
   }
 
+ async  publishPost(
+  baname: string,
+  user: string,
+  content: string,
+  image?: string
+): Promise<PostItem | null> {
+  const httpRequest = http.createHttp();
 
+  try {
 
+    // 发送 POST 请求
+    const response = await httpRequest.request(
+      'http://10.205.218.246:8080/posts',
+      {
+        method: http.RequestMethod.POST,
+        header: { 'Content-Type': 'application/json' },
+        extraData: JSON.stringify({ baname, user, content, image })
+      }
+    );
 
+    // 解析响应
+    const text =
+      typeof response.result === 'string'
+        ? response.result
+        : new util.TextDecoder('utf-8').decode(response.result as Uint8Array);
 
+    const data = JSON.parse(text) as PostItem;
+
+    return data;
+  } catch (e) {
+    console.error('发帖失败', e);
+    return null;
+  } finally {
+    httpRequest.destroy();
+  }
+}
+
+  async onPublishClick() {
+    if (!this.selectedBa || this.content.length === 0) return;
+
+    const newPost = await this.publishPost(
+      this.selectedBa,
+      this.userName,
+      this.content,
+      this.selectedImage // 可选
+    );
+
+    if (newPost) {
+      this.posts.push(newPost);
+
+      // 清空状态
+      this.content = '';
+      this.selectedBa = '';
+      this.selectedImage = '';
+    }
+  }
+
+  private async loadUserNameFromDB() {
+    this.loading = true;
+    const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const userInfo = await loadUserInfo(currentContext);
+    const userId: number = parseInt(userInfo.id, 10) || 0;
+
+    if (!userId) {
+      console.error("未登录或用户ID丢失");
+      this.loading = false;
+      return;
+    }
+
+    const httpRequest = http.createHttp();
+    try {
+      const response = await httpRequest.request(
+        `http://10.205.218.246:8080/api/user/${userId}`,  // GET 用户名端点
+        {
+          method: http.RequestMethod.GET,
+          header: { "Content-Type": "application/json" }
+          // 如果需要认证，加 token header
+        }
+      );
+
+      let text = typeof response.result === "string"
+        ? response.result
+        : new util.TextDecoder("utf-8").decode(response.result as Uint8Array);
+
+      const data = JSON.parse(text) as { success: boolean; name: string };
+      if (data.success) {
+        this.userName = data.name || "默认用户";
+        await saveUserName(this.userName, this.getUIContext().getHostContext() as common.UIAbilityContext);  // 同步本地
+      } else {
+        this.userName = "默认用户";
+      }
+      console.log("加载用户名结果:", text);
+    } catch (e) {
+      console.error('加载用户名失败:', e);
+      this.userName = "默认用户";
+    } finally {
+      httpRequest.destroy();
+      this.loading = false;
+    }
+  }
 
   build() {
     Stack() {
@@ -344,7 +464,7 @@ struct HomePage {
                    if (this.isEditing) {
                      const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
 
-                     // 使用 loadUserInfo 读取 userId（替换 AppStorage.Get）
+
                      const userInfo = await loadUserInfo(currentContext);
                      const userId: number = parseInt(userInfo.id, 10) || 0;  // 转回 number
 
@@ -490,9 +610,17 @@ struct HomePage {
 
             // 选择图片区域
             Column() {
-              Text('+')
-                .fontSize(40)
-                .fontColor('#AAAAAA')
+              if (this.selectedImage !== '') {
+                Image(this.selectedImage)
+                  .width(100)
+                  .height(100)
+                  .borderRadius(12)
+                  //.objectFit('cover')
+              } else {
+                Text('+')
+                  .fontSize(40)
+                  .fontColor('#AAAAAA')
+              }
             }
 
               .width(100)
@@ -502,9 +630,8 @@ struct HomePage {
               .justifyContent(FlexAlign.Center)
               .alignItems(HorizontalAlign.Center)
               .backgroundColor('#F5F5F5')
-              .onClick(() => {
-              // 选图
-
+            .onClick(async () => {
+              await this.pickImageForPost();
             })
 
 
@@ -557,25 +684,18 @@ struct HomePage {
               )
               .fontColor(Color.White)
               .fontSize(18)
-              .onClick(() => {
+              .onClick(async () => {
                 if (this.content.length === 0 || this.selectedBa === '') return
 
-                this.posts.push({
-                  baname: this.selectedBa,
-                  user: this.userName,
-                  time: new Date().toLocaleString(),
-                  content: this.content,
-                  image:  '',//选择图片的实现
-                  likes: 0,
-                  comments: 0
-                })
-
-                // 清空状态
-                this.content = ''
-
-                this.selectedBa = ''
+                // 调用后端 API
+                try {
+                  await this.onPublishClick()
+                } catch (err) {
+                  console.error('发布失败', err);
+                }
 
               })
+
           }
           .width('100%')
           .alignItems(HorizontalAlign.Center)
