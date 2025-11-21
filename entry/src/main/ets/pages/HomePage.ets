@@ -10,17 +10,20 @@ import image from '@ohos.multimedia.image';
 import http from '@ohos.net.http';
 import util from '@ohos.util';
 import preferences from '@ohos.data.preferences'
-
+import promptAction from '@ohos.promptAction';
 import fs from '@ohos.file.fs';
+import { Prompt } from '@kit.ArkUI';
 
 interface PostItem {
+  id:string
   baname:string
   user: string
-  time: string
+  createTime: number
   content: string
   image?: string
   likes: number
   comments: number
+  liked?: boolean;
 }
 
 interface ForumItem {
@@ -43,6 +46,16 @@ interface UpdateNameResponse {
   message?: string;
 }
 
+interface UserInfoResponse {
+  success: boolean;
+  name: string;
+  // 如果还有其他字段也一起加上
+}
+
+interface PostListResponse {
+  success: boolean;
+  posts: PostItem[];
+}
 
 
 @Entry
@@ -59,6 +72,7 @@ struct HomePage {
   @State selectedImage: string = ''
   @StorageLink('posts') posts: PostItem[] = []
   @State loading: boolean = false;
+  @State publishing: boolean = false
 
   @State forums: ForumItem[] = [
     {
@@ -139,79 +153,6 @@ struct HomePage {
     }
   }
 
-  aboutToAppear() {
-    if (!this.posts || this.posts.length === 0) {
-      this.posts = [
-        { baname:'浙江农林大学吧', user: '用户1', time: '1小时前', content: '这是第一条帖子内容。', image: 'app.media.bj2', likes: 0, comments: 0 },
-        { baname:'明日方舟吧', user: '用户2', time: '2小时前', content: '今天心情不错～', image: '', likes: 0, comments: 0 },
-        { baname:'bilibili吧', user: '用户2', time: '3小时前', content: '有人吗', image: 'app.media.tutu', likes: 0, comments: 0 },
-      ]
-
-      try {
-        PersistentStorage.persistProp('posts',[])
-      } catch (e) {
-        console.warn('PersistentStorage.persistProp 可能在当前环境不可用：', e)
-      }
-    }
-  }
-
- async  publishPost(
-  baname: string,
-  user: string,
-  content: string,
-  image?: string
-): Promise<PostItem | null> {
-  const httpRequest = http.createHttp();
-
-  try {
-
-    // 发送 POST 请求
-    const response = await httpRequest.request(
-      'http://10.205.218.246:8080/posts',
-      {
-        method: http.RequestMethod.POST,
-        header: { 'Content-Type': 'application/json' },
-        extraData: JSON.stringify({ baname, user, content, image })
-      }
-    );
-
-    // 解析响应
-    const text =
-      typeof response.result === 'string'
-        ? response.result
-        : new util.TextDecoder('utf-8').decode(response.result as Uint8Array);
-
-    const data = JSON.parse(text) as PostItem;
-
-    return data;
-  } catch (e) {
-    console.error('发帖失败', e);
-    return null;
-  } finally {
-    httpRequest.destroy();
-  }
-}
-
-  async onPublishClick() {
-    if (!this.selectedBa || this.content.length === 0) return;
-
-    const newPost = await this.publishPost(
-      this.selectedBa,
-      this.userName,
-      this.content,
-      this.selectedImage // 可选
-    );
-
-    if (newPost) {
-      this.posts.push(newPost);
-
-      // 清空状态
-      this.content = '';
-      this.selectedBa = '';
-      this.selectedImage = '';
-    }
-  }
-
   private async loadUserNameFromDB() {
     this.loading = true;
     const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -227,33 +168,150 @@ struct HomePage {
     const httpRequest = http.createHttp();
     try {
       const response = await httpRequest.request(
-        `http://10.205.218.246:8080/api/user/${userId}`,  // GET 用户名端点
-        {
-          method: http.RequestMethod.GET,
-          header: { "Content-Type": "application/json" }
-          // 如果需要认证，加 token header
-        }
+        `http://10.205.218.246:8080/api/user/${userId}`,
+        { method: http.RequestMethod.GET }
       );
+
+      // 关键：先检查 HTTP 状态码
+      if (response.responseCode === 404) {
+        console.warn("服务器用户不存在，使用本地缓存名字:", userInfo.name);
+        this.userName = userInfo.name || "默认用户";
+        this.loading = false;
+        httpRequest.destroy();
+        return;  // 直接返回，不覆盖本地
+      }
 
       let text = typeof response.result === "string"
         ? response.result
         : new util.TextDecoder("utf-8").decode(response.result as Uint8Array);
 
-      const data = JSON.parse(text) as { success: boolean; name: string };
-      if (data.success) {
-        this.userName = data.name || "默认用户";
-        await saveUserName(this.userName, this.getUIContext().getHostContext() as common.UIAbilityContext);  // 同步本地
+      const data = JSON.parse(text) as UserInfoResponse;
+
+      if (data.success && data.name) {
+        this.userName = data.name;
+        // 只有服务器返回成功且有名字，才同步到本地
+        await saveUserName(this.userName, currentContext);
       } else {
-        this.userName = "默认用户";
+        // 服务器返回了但数据不完整 → 保留本地已有名字
+        console.warn("服务器返回异常，使用本地名字:", userInfo.name);
+        this.userName = userInfo.name || "默认用户";
       }
-      console.log("加载用户名结果:", text);
     } catch (e) {
-      console.error('加载用户名失败:', e);
-      this.userName = "默认用户";
+      // 网络错误、超时、解析失败等 → 保留本地已有名字
+      console.error('加载用户名失败，使用本地缓存:', e);
+      this.userName = userInfo.name || "默认用户";
+      // 不要在这里调用 saveUserName！
     } finally {
       httpRequest.destroy();
       this.loading = false;
     }
+  }
+
+  generatePostId(): string {
+    return Date.now().toString() + Math.floor(Math.random() * 10000).toString();
+  }
+
+  toggleLike(post: PostItem) {
+    post.liked = !post.liked;
+    post.likes += post.liked ? 1 : -1;
+  }
+
+  async onPublishClick() {
+    try {
+
+      const postData: PostItem = {
+        id: this.generatePostId(),
+        user: this.userName,
+        content: this.content,
+        baname: this.selectedBa,
+        createTime: Date.now(),
+        image: this.selectedImage,
+        likes:0,
+        comments:0
+      };
+
+      console.log("提交数据：", JSON.stringify(postData));
+
+      // 3. 发送 POST 请求
+      const httpRequest = http.createHttp();
+      const response = await httpRequest.request(
+        'http://10.205.218.246:8080/api/post/publish',
+        {
+          method: http.RequestMethod.POST,
+          header: { 'Content-Type': 'application/json' },
+          extraData: JSON.stringify(postData)
+        }
+      );
+
+      if (response.responseCode === 200) {
+        console.log('发布成功:', response.result);
+
+        // 发布成功后可以清空
+        this.content = '';
+        this.selectedBa = '';
+        this.selectedImage = '';
+
+        Prompt.showToast({ message: "发布成功" });
+
+          // 切换回首页并刷新帖子
+          this.currentTab = 'home';
+          await this.fetchPosts();
+
+      } else {
+        console.error('发布失败',  JSON.stringify(response));
+        Prompt.showToast({ message: "发布失败" });
+      }
+
+    } catch (err) {
+      console.error("发布出错：", JSON.stringify(err));
+      Prompt.showToast({ message: "网络错误" });
+    }
+  }
+
+  async fetchPosts() {
+    try {
+      const httpRequest = http.createHttp();
+      const response = await httpRequest.request(
+        'http://10.205.218.246:8080/api/post/list',
+        { method: http.RequestMethod.GET }
+      );
+
+      const data = JSON.parse(response.result as string) as PostListResponse;
+
+      if (data.success) {
+        this.posts = data.posts as PostItem[];
+        this.posts = data.posts.map(post => {
+          const p: PostItem = {
+            id: post.id,
+            user: post.user,
+            content: post.content,
+            baname: post.baname,
+            createTime: post.createTime,
+            image: post.image,
+            likes: post.likes ?? 0,
+            comments: post.comments,
+            liked: false, // 前端点赞状态
+          };
+          return p;});
+        console.log('加载帖子成功',  JSON.stringify(this.posts, null, 2));
+      }
+    } catch (err) {
+      console.error('获取帖子失败', err);
+    }
+
+
+  }
+
+  formatTime(timestamp: number): string {
+    const date = new Date(timestamp);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ` +
+      `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  aboutToAppear() {
+    this.loadUserNameFromDB();
+    this.fetchPosts();
   }
 
   build() {
@@ -268,6 +326,7 @@ struct HomePage {
       Column({ space: 30 }) {
         // 顶部搜索框
         if (this.currentTab === 'home') {
+
           Row() {
             Image($r('app.media.icon_search'))
               .width(24)
@@ -296,93 +355,91 @@ struct HomePage {
 
             Scroll() {
               Column({ space: 16 }) {
-                // 用 StorageLink 绑定的 this.posts 来渲染
                 ForEach(this.posts, (post: PostItem) => {
                   Column() {
                     // 帖子头部
                     Row({ space: 10 }) {
+                      Image(this.forums.find(b => b.baname === post.baname)?.icon)
+                        .width(40)
+                        .height(40)
+                        .borderRadius(20)
+                        .margin({ right: 10 });
 
-                        Image(this.forums.find(b => b.baname === post.baname)?.icon)
-                          .width(40)
-                          .height(40)
-                          .borderRadius(20)
-
-                          .margin({ right: 10 })
-
-                        Text(post.baname)
-                          .fontSize(16)
-                          .fontColor(Color.Black)
-                          .fontWeight(FontWeight.Medium)
-                          .margin({
-                            top: 8,
-                            bottom: 8,
-                            right: 15,
-                            left: -8
-                          })
-
+                      Text(post.baname)
+                        .fontSize(16)
+                        .fontColor(Color.Black)
+                        .fontWeight(FontWeight.Medium)
+                        .margin({ top: 8, bottom: 8 });
                     }
 
+                    // 用户信息
                     Row({ space: 2 }) {
                       Image($r('app.media.head'))
                         .width(40)
                         .height(40)
                         .borderRadius(20)
-                        .backgroundColor('#CCCCCC')
+                        .backgroundColor('#CCCCCC');
 
                       Column({ space: 2 }) {
-                        Text(post.user).fontSize(15).fontWeight(FontWeight.Medium).fontColor(Color.Black)
-                        Text(post.time).fontSize(12).fontColor('#999999')
-                      }.alignItems(HorizontalAlign.Start)
+                        Text(post.user)
+                          .fontSize(15)
+                          .fontWeight(FontWeight.Medium)
+                          .fontColor(Color.Black);
+
+                        Text( this.formatTime(post.createTime) )
+                          .fontSize(12)
+                          .fontColor('#999999');
+                      }.alignItems(HorizontalAlign.Start);
                     }
+
                     // 内容
                     Text(post.content)
                       .fontSize(14)
                       .fontColor(Color.Black)
-                      .margin({ top: 8, bottom: 8 })
+                      .margin({ top: 8, bottom: 8 });
 
-                    // 图片（有的话显示）
-                    Image($r(post.image ?? null))
+                    // 图片
+                    if (post.image) {
+                      Image($r(post.image))
                         .width('100%')
-                        .height(post.image ? 180 : 0)
+                        .height(180)
                         .borderRadius(12)
-                        .objectFit(ImageFit.Cover)
-
+                        .objectFit(ImageFit.Cover);
+                    }
 
                     // 操作栏
-                    Row({ space: 75 }) {
-
-                      Text(this.likesClicked ? `👍 点赞${post.likes}` : `👍 点赞${post.likes}`)
+                    Row({ space: 80 }) {
+                      Text(`👍 点赞${post.likes}`)
                         .fontColor('#666666')
                         .fontSize(13)
-                        .onClick(() => {
-                          if(!this.likesClicked) // 切换状态
-                          {
-                            post.likes+=1
-                            this.likesClicked=!this.likesClicked
-                          }
-                          else{
-                            post.likes-=1
-                            this.likesClicked=!this.likesClicked
-                          }
+                        .onClick(() => this.toggleLike(post));
 
-                        })
-                      Text(`💬 评论${post.comments}`).fontColor('#666666').fontSize(13)
-                      Text('↗ 分享').fontColor('#666666').fontSize(13)
-                    }.margin({ top: 8 })
+                      Text(`💬 评论${post.comments}`)
+                        .fontColor('#666666')
+                        .fontSize(13);
+
+                      Text('↗ 分享')
+                        .fontColor('#666666')
+                        .fontSize(13);
+                    }
+                    .margin({ top: 8 })
                   }
+                  .width('105%')
                   .padding(12)
                   .backgroundColor('#F9F9F9')
                   .borderRadius(16)
                   .shadow({ radius: 2, color: '#22000000', offsetX: 0, offsetY: 2 })
+                  .alignItems(HorizontalAlign.Start);
 
-                  .alignItems(HorizontalAlign.Start)
-                })
+                });
               }
               .width('100%')
-              .padding({ top: 10, bottom: 20 })
+              .padding({ top: 10, bottom: 20 });
             }
             .width('95%')
             .height('100%')
+            .margin({top:10})
+            .scrollBar(BarState.Off)
           }
           .width('95%')
           .height(612)
@@ -447,9 +504,6 @@ struct HomePage {
                   .margin({ top: 10 })
               }
 
-
-
-              // 4️⃣ 蓝框白字“编辑”按钮
                Text(this.isEditing ? "保存" : "编辑")
                 .fontSize(18)
                 .fontColor(Color.White)
@@ -515,7 +569,54 @@ struct HomePage {
                 }
               }
               .margin({ top: 10 })
-            }
+
+              Button("退出登录")
+                .width('80%')
+                .height(48)
+                .fontSize(18)
+                .fontColor(Color.White)
+                .backgroundColor(Color.Red)          // 红色更醒目
+                .borderRadius(12)
+                .margin({ top: 40, bottom: 30 })     // 给点上下间距
+                .onClick(async () => {
+                  // 1. 弹个确认框（可选，防止误点）
+                  const result: promptAction.ShowDialogSuccessResponse = await promptAction.showDialog({
+                    title: '退出登录',
+                    message: '确定要退出当前账号吗？',
+                    buttons: [
+                      { text: '取消', color: '#666666' },
+                      { text: '确定', color: '#FF0000' }
+                    ]
+                  });
+
+                  if (result.index !== 1) return; // 点取消直接返回
+
+                  // 2. 清除本地登录信息（preferences）
+                  const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+                  try {
+                    const storage = await preferences.getPreferences(context, "userInfo");
+                    await storage.clear(); // 清除全部键值对
+                    await storage.flush();
+                    console.log("本地登录信息已清除");
+                  } catch (e) {
+                    console.error("清除登录信息失败:", e);
+                  }
+
+                  // 3. 可选：把内存里的状态也清空
+                  this.userName = "";
+
+                  this.isEditing = false;
+
+
+                  router.replaceUrl({ url: 'pages/LoginPage' });
+
+                })
+
+
+
+
+
+          }
             .width('95%')
             .height('calc(115% - 100px)')
             .borderRadius(25)
@@ -523,11 +624,7 @@ struct HomePage {
             .alignItems(HorizontalAlign.Center)
             .justifyContent(FlexAlign.Center)
             .margin({ top: 30 })
-
-
-
-
-          }
+        }
         }
         else if (this.currentTab === 'forum') {
           Column() {

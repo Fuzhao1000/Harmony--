@@ -35,7 +35,7 @@ struct WelcomePage {
         })
     }
 
-    .margin({ top: 200,left: 80 })
+    .margin({ top: 200,left: 90 })
 
 
   }
