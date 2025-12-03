@@ -12,7 +12,7 @@ import util from '@ohos.util';
 import preferences from '@ohos.data.preferences'
 import promptAction from '@ohos.promptAction';
 import fs from '@ohos.file.fs';
-import { Prompt } from '@kit.ArkUI';
+import { prompt, Prompt } from '@kit.ArkUI';
 
 interface PostItem {
   id:string
@@ -24,6 +24,7 @@ interface PostItem {
   likes: number
   comments: number
   liked?: boolean;
+  favorited?: boolean;
 }
 
 interface ForumItem {
@@ -57,6 +58,10 @@ interface PostListResponse {
   posts: PostItem[];
 }
 
+interface FavoriteResponse {
+  success: boolean;
+  favoritePostIds: number[];
+}
 
 @Entry
 @Component
@@ -271,36 +276,58 @@ struct HomePage {
   async fetchPosts() {
     try {
       const httpRequest = http.createHttp();
-      const response = await httpRequest.request(
-        'http://10.205.218.246:8080/api/post/list',
+
+      // 1. 获取用户 ID
+      const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const userInfo = await loadUserInfo(currentContext);
+      const userId: number = parseInt(userInfo.id, 10) || 0;
+
+      // 2. 获取帖子列表
+      const postResp = await httpRequest.request(
+        `http://10.205.218.246:8080/api/post/list?userId=${userId}`,
+        { method: http.RequestMethod.GET }
+      );
+      const postData = JSON.parse(postResp.result as string) as PostListResponse;
+
+      if (!postData.success) return;
+
+      // 3. 获取当前用户收藏列表
+      const favResp = await httpRequest.request(
+        `http://10.205.218.246:8080/api/post/list?userId=${userId}`,
         { method: http.RequestMethod.GET }
       );
 
-      const data = JSON.parse(response.result as string) as PostListResponse;
 
-      if (data.success) {
-        this.posts = data.posts as PostItem[];
-        this.posts = data.posts.map(post => {
-          const p: PostItem = {
-            id: post.id,
-            user: post.user,
-            content: post.content,
-            baname: post.baname,
-            createTime: post.createTime,
-            image: post.image,
-            likes: post.likes ?? 0,
-            comments: post.comments,
-            liked: false, // 前端点赞状态
-          };
-          return p;});
-        console.log('加载帖子成功',  JSON.stringify(this.posts, null, 2));
-      }
+      const favData = JSON.parse(favResp.result as string) as FavoriteResponse;
+
+      const favSet = new Set(favData.favoritePostIds ?? []);
+
+
+
+      // 4. 生成前端需要的 PostItem 数组，并标记 favorited
+      this.posts = postData.posts.map((post) => {
+        const p: PostItem = {
+          id: post.id,
+          user: post.user,
+          content: post.content,
+          baname: post.baname,
+          createTime: post.createTime,
+          image: post.image,
+          likes: post.likes ?? 0,
+          comments: post.comments ?? 0,
+          liked: false,
+          favorited: favSet.has(Number(post.id))   // ★ 标记已收藏
+        };
+        return p;
+      });
+
+      console.log("加载帖子成功：", JSON.stringify(this.posts, null, 2));
+
     } catch (err) {
-      console.error('获取帖子失败', err);
+      console.error("获取帖子失败", err);
     }
-
-
   }
+
 
   formatTime(timestamp: number): string {
     const date = new Date(timestamp);
@@ -308,6 +335,44 @@ struct HomePage {
     return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ` +
       `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
   }
+
+  async toggleFavorite(post: PostItem) {
+    const httpRequest = http.createHttp();
+    const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const userInfo = await loadUserInfo(currentContext);
+    const userId: number = parseInt(userInfo.id, 10) || 0;
+
+    try {
+      const response = await httpRequest.request(
+        'http://10.205.218.246:8080/api/favorite/toggle',
+        {
+          method: http.RequestMethod.POST,
+          header: { 'Content-Type': 'application/json' },
+          extraData: JSON.stringify({
+            userId: userId,
+            postId: Number(post.id)
+          })
+        }
+      );
+
+
+
+      const data = JSON.parse(response.result as string) as PostListResponse;
+
+      if (data.success) {
+        post.favorited = !post.favorited;
+
+        prompt.showToast({
+          message: post.favorited ? '收藏成功 ❤️' : '已取消收藏 ♡'
+        });
+        await this.fetchPosts();
+      }
+    } catch (err) {
+      console.error('收藏失败：', JSON.stringify(err, null, 2));
+      prompt.showToast({ message: '收藏失败，请稍后再试' });
+    }
+  }
+
 
   aboutToAppear() {
     this.loadUserNameFromDB();
@@ -370,6 +435,11 @@ struct HomePage {
                         .fontColor(Color.Black)
                         .fontWeight(FontWeight.Medium)
                         .margin({ top: 8, bottom: 8 });
+
+                      Text(post.favorited ? `♥ 已收藏` : `♡ 收藏`)
+                        .fontColor(post.favorited ? Color.Red : '#666666')
+                        .fontSize(13)
+                        .onClick(() => this.toggleFavorite(post));
                     }
 
                     // 用户信息
@@ -565,6 +635,11 @@ struct HomePage {
 
                 Column() {
                   Text("粉丝").fontSize(16).fontColor(Color.Gray)
+                  Text("0").fontSize(18).fontColor(Color.Black)
+                }
+
+                Column() {
+                  Text("收藏").fontSize(16).fontColor(Color.Gray)
                   Text("0").fontSize(18).fontColor(Color.Black)
                 }
               }
