@@ -78,6 +78,7 @@ struct HomePage {
   @StorageLink('posts') posts: PostItem[] = []
   @State loading: boolean = false;
   @State publishing: boolean = false
+  @State favoritePosts: PostItem[] = [];
 
   @State forums: ForumItem[] = [
     {
@@ -213,7 +214,7 @@ struct HomePage {
   }
 
   generatePostId(): string {
-    return Date.now().toString() + Math.floor(Math.random() * 10000).toString();
+    return Date.now().toString();
   }
 
   toggleLike(post: PostItem) {
@@ -293,7 +294,7 @@ struct HomePage {
 
       // 3. 获取当前用户收藏列表
       const favResp = await httpRequest.request(
-        `http://10.205.218.246:8080/api/post/list?userId=${userId}`,
+        `http://10.205.218.246:8080/api/favorite/list?userId=${userId}`,
         { method: http.RequestMethod.GET }
       );
 
@@ -321,10 +322,57 @@ struct HomePage {
         return p;
       });
 
-      console.log("加载帖子成功：", JSON.stringify(this.posts, null, 2));
-
+     // console.log("加载帖子成功：", JSON.stringify(this.posts, null, 2));
+     // console.log("eeeee：", JSON.stringify(favSet, null, 2));
     } catch (err) {
       console.error("获取帖子失败", err);
+    }
+  }
+
+  async fetchFavoritePosts() {
+    try {
+      const httpRequest = http.createHttp();
+      const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const userInfo = await loadUserInfo(currentContext);
+      const userId: number = parseInt(userInfo.id, 10) || 0;
+
+      // 1. 获取收藏的帖子列表
+      const resp = await httpRequest.request(
+        `http://10.205.218.246:8080/api/post/favList?userId=${userId}`,
+        { method: http.RequestMethod.GET }
+      );
+      const favPostList = JSON.parse(resp.result as string) as PostListResponse;
+
+      // 2. 获取收藏 id 列表（favSet）
+      const favResp = await httpRequest.request(
+        `http://10.205.218.246:8080/api/favorite/list?userId=${userId}`,
+        { method: http.RequestMethod.GET }
+      );
+      const favData = JSON.parse(favResp.result as string)as FavoriteResponse;
+      const favSet = new Set(favData.favoritePostIds ?? []);
+
+      // 3. 生成收藏贴列表并加上 favorited=true
+      this.favoritePosts= favPostList.posts.map((post) => {
+        const p: PostItem = {
+          id: post.id,
+          user: post.user,
+          content: post.content,
+          baname: post.baname,
+          createTime: post.createTime,
+          image: post.image,
+          likes: post.likes ?? 0,
+          comments: post.comments ?? 0,
+          liked: false,
+          favorited: favSet.has(Number(post.id))   // ★ 标记已收藏
+        };
+        return p;
+      });
+
+      console.log("收藏帖子：", this.favoritePosts);
+
+    } catch (err) {
+      console.error("加载收藏失败", err);
+      this.favoritePosts = [];
     }
   }
 
@@ -365,14 +413,16 @@ struct HomePage {
         prompt.showToast({
           message: post.favorited ? '收藏成功 ❤️' : '已取消收藏 ♡'
         });
-        await this.fetchPosts();
+
+        if(this.currentTab === 'favorite'){
+          await this.fetchFavoritePosts();
+        }else if(this.currentTab === 'home'){await this.fetchPosts();}
       }
     } catch (err) {
       console.error('收藏失败：', JSON.stringify(err, null, 2));
       prompt.showToast({ message: '收藏失败，请稍后再试' });
     }
   }
-
 
   aboutToAppear() {
     this.loadUserNameFromDB();
@@ -389,7 +439,7 @@ struct HomePage {
 
 
       Column({ space: 30 }) {
-        // 顶部搜索框
+
         if (this.currentTab === 'home') {
 
           Row() {
@@ -639,8 +689,12 @@ struct HomePage {
                 }
 
                 Column() {
-                  Text("收藏").fontSize(16).fontColor(Color.Gray)
+                  Button("收藏").fontSize(16).fontColor(Color.White).onClick(() => {
+                    this.currentTab = "favorite";
+                    this.fetchFavoritePosts();
+                  })
                   Text("0").fontSize(18).fontColor(Color.Black)
+
                 }
               }
               .margin({ top: 10 })
@@ -761,7 +815,6 @@ struct HomePage {
         }
 
 
-
         if (this.currentTab === 'post'){
           Column({ space: 20 }) {
             // 顶部标题
@@ -879,7 +932,109 @@ struct HomePage {
 
         }
 
+        if (this.currentTab === 'favorite'){
+            Column() {
+              Scroll() {
+                Column({ space: 16 }) {
+                  ForEach(this.favoritePosts, (post: PostItem) => {
+                    Column() {
+                      // 帖子头部
+                      Row({ space: 10 }) {
+                        Image(this.forums.find(b => b.baname === post.baname)?.icon)
+                          .width(40)
+                          .height(40)
+                          .borderRadius(20)
+                          .margin({ right: 10 });
 
+                        Text(post.baname)
+                          .fontSize(16)
+                          .fontColor(Color.Black)
+                          .fontWeight(FontWeight.Medium)
+                          .margin({ top: 8, bottom: 8 });
+
+                        Text(post.favorited ? `♥ 已收藏` : `♡ 收藏`)
+                          .fontColor(post.favorited ? Color.Red : '#666666')
+                          .fontSize(13)
+                          .onClick(() => this.toggleFavorite(post));
+                      }
+
+                      // 用户信息
+                      Row({ space: 2 }) {
+                        Image($r('app.media.head'))
+                          .width(40)
+                          .height(40)
+                          .borderRadius(20)
+                          .backgroundColor('#CCCCCC');
+
+                        Column({ space: 2 }) {
+                          Text(post.user)
+                            .fontSize(15)
+                            .fontWeight(FontWeight.Medium)
+                            .fontColor(Color.Black);
+
+                          Text( this.formatTime(post.createTime) )
+                            .fontSize(12)
+                            .fontColor('#999999');
+                        }.alignItems(HorizontalAlign.Start);
+                      }
+
+                      // 内容
+                      Text(post.content)
+                        .fontSize(14)
+                        .fontColor(Color.Black)
+                        .margin({ top: 8, bottom: 8 });
+
+                      // 图片
+                      if (post.image) {
+                        Image($r(post.image))
+                          .width('100%')
+                          .height(180)
+                          .borderRadius(12)
+                          .objectFit(ImageFit.Cover);
+                      }
+
+                      // 操作栏
+                      Row({ space: 80 }) {
+                        Text(`👍 点赞${post.likes}`)
+                          .fontColor('#666666')
+                          .fontSize(13)
+                          .onClick(() => this.toggleLike(post));
+
+                        Text(`💬 评论${post.comments}`)
+                          .fontColor('#666666')
+                          .fontSize(13);
+
+                        Text('↗ 分享')
+                          .fontColor('#666666')
+                          .fontSize(13);
+                      }
+                      .margin({ top: 8 })
+                    }
+                    .width('105%')
+                    .padding(12)
+                    .backgroundColor('#F9F9F9')
+                    .borderRadius(16)
+                    .shadow({ radius: 2, color: '#22000000', offsetX: 0, offsetY: 2 })
+                    .alignItems(HorizontalAlign.Start);
+
+                  });
+                }
+                .width('100%')
+                .padding({ top: 10, bottom: 20 });
+              }
+              .width('95%')
+              .height('100%')
+              .margin({top:10})
+              .scrollBar(BarState.Off)
+            }
+            .width('95%')
+            .height(612)
+            .borderRadius(25)
+            .backgroundColor(Color.White)
+            .alignItems(HorizontalAlign.Center)
+            .justifyContent(FlexAlign.Start)
+            .margin({ top: -10 })
+        }
 
 
       }
@@ -891,6 +1046,7 @@ struct HomePage {
           Text("首页").fontSize(27).fontColor(this.currentTab === 'home' ? '#007AFF' : Color.Black)
             .onClick(() => {
               this.currentTab = 'home'
+              this.fetchPosts()
             })
         }
 
