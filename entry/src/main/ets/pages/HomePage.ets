@@ -63,6 +63,17 @@ interface FavoriteResponse {
   favoritePostIds: number[];
 }
 
+interface LikeResponse{
+  success: boolean // 是否成功
+  liked: boolean;   // 当前状态：true=已点赞，false=未点赞
+  likes: number
+}
+
+interface LikeListResponse {
+  success: boolean;
+  likedPostIds: number[];
+}
+
 @Entry
 @Component
 struct HomePage {
@@ -217,10 +228,33 @@ struct HomePage {
     return Date.now().toString();
   }
 
-  toggleLike(post: PostItem) {
-    post.liked = !post.liked;
-    post.likes += post.liked ? 1 : -1;
+  async toggleLike(post: PostItem) {
+    try {
+      const httpRequest = http.createHttp();
+      const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const userInfo = await loadUserInfo(currentContext);
+      const userId: number = parseInt(userInfo.id, 10) || 0;
+
+      const resp = await httpRequest.request(
+        `http://10.205.218.246:8080/api/like/toggleLike?userId=${userId}&postId=${Number(post.id)}`,
+        {
+          method: http.RequestMethod.POST
+        }
+      );
+
+
+      const data = JSON.parse(resp.result as string) as LikeResponse;
+
+
+        post.liked = data.liked;
+        post.likes = data.likes;
+
+      await this.fetchPosts()
+    } catch (e) {
+      console.error("点赞错误", e);
+    }
   }
+
 
   async onPublishClick() {
     try {
@@ -303,6 +337,13 @@ struct HomePage {
 
       const favSet = new Set(favData.favoritePostIds ?? []);
 
+      const likeResp = await httpRequest.request(
+        `http://10.205.218.246:8080/api/like/list?userId=${userId}`,
+        { method: http.RequestMethod.GET }
+      );
+      const likeData = JSON.parse(likeResp.result as string) as LikeListResponse;
+
+      const likedSet = new Set(likeData.likedPostIds ?? []);
 
 
       // 4. 生成前端需要的 PostItem 数组，并标记 favorited
@@ -316,7 +357,7 @@ struct HomePage {
           image: post.image,
           likes: post.likes ?? 0,
           comments: post.comments ?? 0,
-          liked: false,
+          liked: likedSet.has(Number(post.id)),
           favorited: favSet.has(Number(post.id))   // ★ 标记已收藏
         };
         return p;
@@ -375,7 +416,6 @@ struct HomePage {
       this.favoritePosts = [];
     }
   }
-
 
   formatTime(timestamp: number): string {
     const date = new Date(timestamp);
@@ -529,8 +569,8 @@ struct HomePage {
 
                     // 操作栏
                     Row({ space: 80 }) {
-                      Text(`👍 点赞${post.likes}`)
-                        .fontColor('#666666')
+                      Text(post.liked ? `❤️ 已点赞 ${post.likes}` : `👍 点赞 ${post.likes}`)
+                        .fontColor(post.liked ? Color.Red : '#666666')
                         .fontSize(13)
                         .onClick(() => this.toggleLike(post));
 
