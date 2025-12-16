@@ -248,13 +248,17 @@ struct HomePage {
 
         post.liked = data.liked;
         post.likes = data.likes;
-
-      await this.fetchPosts()
+  if (this.currentTab === 'home') {
+    await this.fetchPosts()
+  }
+  else if (this.currentTab === 'favorite')
+  {
+    await this.fetchFavoritePosts()
+  }
     } catch (e) {
       console.error("点赞错误", e);
     }
   }
-
 
   async onPublishClick() {
     try {
@@ -392,7 +396,14 @@ struct HomePage {
       const favData = JSON.parse(favResp.result as string)as FavoriteResponse;
       const favSet = new Set(favData.favoritePostIds ?? []);
 
-      // 3. 生成收藏贴列表并加上 favorited=true
+      const likeResp = await httpRequest.request(
+        `http://10.205.218.246:8080/api/like/list?userId=${userId}`,
+        { method: http.RequestMethod.GET }
+      );
+      const likeData = JSON.parse(likeResp.result as string) as LikeListResponse;
+
+      const likedSet = new Set(likeData.likedPostIds ?? []);
+
       this.favoritePosts= favPostList.posts.map((post) => {
         const p: PostItem = {
           id: post.id,
@@ -403,7 +414,7 @@ struct HomePage {
           image: post.image,
           likes: post.likes ?? 0,
           comments: post.comments ?? 0,
-          liked: false,
+          liked: likedSet.has(Number(post.id)),
           favorited: favSet.has(Number(post.id))   // ★ 标记已收藏
         };
         return p;
@@ -1035,8 +1046,8 @@ struct HomePage {
 
                       // 操作栏
                       Row({ space: 80 }) {
-                        Text(`👍 点赞${post.likes}`)
-                          .fontColor('#666666')
+                        Text(post.liked ? `❤️ 已点赞 ${post.likes}` : `👍 点赞 ${post.likes}`)
+                          .fontColor(post.liked ? Color.Red : '#666666')
                           .fontSize(13)
                           .onClick(() => this.toggleLike(post));
 
