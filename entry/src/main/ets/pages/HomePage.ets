@@ -13,6 +13,9 @@ import preferences from '@ohos.data.preferences'
 import promptAction from '@ohos.promptAction';
 import fs from '@ohos.file.fs';
 import { prompt, Prompt } from '@kit.ArkUI';
+import { data } from '@kit.TelephonyKit';
+
+import { BASE_URL } from '../pages/ip';
 
 interface PostItem {
   id:string
@@ -74,6 +77,34 @@ interface LikeListResponse {
   likedPostIds: number[];
 }
 
+interface CommentItem {
+  id: number
+  postId: string
+  userId: number
+  content: string
+  createTime: number
+  isMine?: boolean
+  userName?: string
+  avatar?: string
+}
+
+interface CommentListResponse {
+  success: boolean
+  comments: CommentItem[]
+  message?: string
+}
+
+interface SendCommentResponse {
+  success: boolean
+  comment?: CommentItem
+  message?: string
+}
+
+interface BaseResponse {
+  success: boolean
+  msg?: string
+}
+
 @Entry
 @Component
 struct HomePage {
@@ -90,7 +121,7 @@ struct HomePage {
   @State loading: boolean = false;
   @State publishing: boolean = false
   @State favoritePosts: PostItem[] = [];
-
+  @State showShare: boolean = false
   @State forums: ForumItem[] = [
     {
       baname: "浙江农林大学吧",
@@ -123,6 +154,41 @@ struct HomePage {
       icon: $r('app.media.rz')
     }
   ]
+  @State showCommentPanel: boolean = false
+  @State currentPost: PostItem | null = null
+  @State currentPostId: number = 0   // 当前正在评论的帖子
+  @State comments: CommentItem[] = []
+  @State commentInput: string = ''
+
+  @State userId: number = 0
+
+  @Builder
+  CommentItemView(item: CommentItem) {
+    Row({ space: 12 }) {
+      Image(item.avatar ?? $r('app.media.head'))
+        .width(36)
+        .height(36)
+        .borderRadius(18)
+
+      Column({ space: 4 }) {
+        Text(item.userName)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+
+        Text(item.content)
+          .fontSize(13)
+      }
+
+      Blank()
+
+      if (item.isMine) {
+        Text('删除')
+          .fontColor(Color.Red)
+          .fontSize(12)
+          .onClick(() => this.deleteComment(item))
+      }
+    }
+  }
 
   async pickImageFromGallery() {
     try {
@@ -185,7 +251,7 @@ struct HomePage {
     const httpRequest = http.createHttp();
     try {
       const response = await httpRequest.request(
-        `http://10.205.218.246:8080/api/user/${userId}`,
+        `${BASE_URL}/api/user/${userId}`,
         { method: http.RequestMethod.GET }
       );
 
@@ -236,7 +302,7 @@ struct HomePage {
       const userId: number = parseInt(userInfo.id, 10) || 0;
 
       const resp = await httpRequest.request(
-        `http://10.205.218.246:8080/api/like/toggleLike?userId=${userId}&postId=${Number(post.id)}`,
+        `${BASE_URL}/api/like/toggleLike?userId=${userId}&postId=${Number(post.id)}`,
         {
           method: http.RequestMethod.POST
         }
@@ -279,7 +345,7 @@ struct HomePage {
       // 3. 发送 POST 请求
       const httpRequest = http.createHttp();
       const response = await httpRequest.request(
-        'http://10.205.218.246:8080/api/post/publish',
+        '${BASE_URL}/api/post/publish',
         {
           method: http.RequestMethod.POST,
           header: { 'Content-Type': 'application/json' },
@@ -323,7 +389,7 @@ struct HomePage {
 
       // 2. 获取帖子列表
       const postResp = await httpRequest.request(
-        `http://10.205.218.246:8080/api/post/list?userId=${userId}`,
+        `${BASE_URL}/api/post/list?userId=${userId}`,
         { method: http.RequestMethod.GET }
       );
       const postData = JSON.parse(postResp.result as string) as PostListResponse;
@@ -332,7 +398,7 @@ struct HomePage {
 
       // 3. 获取当前用户收藏列表
       const favResp = await httpRequest.request(
-        `http://10.205.218.246:8080/api/favorite/list?userId=${userId}`,
+        `${BASE_URL}/api/favorite/list?userId=${userId}`,
         { method: http.RequestMethod.GET }
       );
 
@@ -342,7 +408,7 @@ struct HomePage {
       const favSet = new Set(favData.favoritePostIds ?? []);
 
       const likeResp = await httpRequest.request(
-        `http://10.205.218.246:8080/api/like/list?userId=${userId}`,
+        `${BASE_URL}/api/like/list?userId=${userId}`,
         { method: http.RequestMethod.GET }
       );
       const likeData = JSON.parse(likeResp.result as string) as LikeListResponse;
@@ -383,21 +449,21 @@ struct HomePage {
 
       // 1. 获取收藏的帖子列表
       const resp = await httpRequest.request(
-        `http://10.205.218.246:8080/api/post/favList?userId=${userId}`,
+        `${BASE_URL}/api/post/favList?userId=${userId}`,
         { method: http.RequestMethod.GET }
       );
       const favPostList = JSON.parse(resp.result as string) as PostListResponse;
 
       // 2. 获取收藏 id 列表（favSet）
       const favResp = await httpRequest.request(
-        `http://10.205.218.246:8080/api/favorite/list?userId=${userId}`,
+        `${BASE_URL}/api/favorite/list?userId=${userId}`,
         { method: http.RequestMethod.GET }
       );
       const favData = JSON.parse(favResp.result as string)as FavoriteResponse;
       const favSet = new Set(favData.favoritePostIds ?? []);
 
       const likeResp = await httpRequest.request(
-        `http://10.205.218.246:8080/api/like/list?userId=${userId}`,
+        `${BASE_URL}/api/like/list?userId=${userId}`,
         { method: http.RequestMethod.GET }
       );
       const likeData = JSON.parse(likeResp.result as string) as LikeListResponse;
@@ -443,7 +509,7 @@ struct HomePage {
 
     try {
       const response = await httpRequest.request(
-        'http://10.205.218.246:8080/api/favorite/toggle',
+        `${BASE_URL}/api/favorite/toggle`,
         {
           method: http.RequestMethod.POST,
           header: { 'Content-Type': 'application/json' },
@@ -474,6 +540,123 @@ struct HomePage {
       prompt.showToast({ message: '收藏失败，请稍后再试' });
     }
   }
+
+  closeComment() {
+    this.showCommentPanel = false
+    this.commentInput = ''
+    this.comments = []
+  }
+
+  async  fetchComments(postId: string): Promise<CommentItem[]> {
+
+  const httpRequest = http.createHttp()
+
+  try {
+    const response = await httpRequest.request(
+      `${BASE_URL}/api/comment/list`,
+      {
+        method: http.RequestMethod.GET,
+        extraData: { postId }
+      }
+    )
+
+    const result = JSON.parse(response.result as string) as CommentListResponse
+
+    this.comments = (result.comments ?? []).map(item => {
+      const comment: CommentItem = {
+        id: item.id,
+        postId: item.postId,
+        userId: item.userId,
+        userName: item.userName,
+        avatar: item.avatar,
+        content: item.content,
+        createTime: item.createTime,
+        isMine: Number(item.userId) === this.userId
+      }
+      return comment
+    })
+
+
+    if (result.success) {
+      return result.comments as CommentItem[]
+    } else {
+      return []
+    }
+
+  } catch (err) {
+    console.error('fetchComments error', err)
+    return []
+  } finally {
+    httpRequest.destroy()
+  }
+}
+
+  async sendComment() {
+    const content = this.commentInput.trim()
+    if (!content) return
+
+    const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext
+    const userInfo = await loadUserInfo(currentContext)
+    const userId = Number(userInfo.id)
+
+    const httpRequest = http.createHttp()
+
+    await httpRequest.request(
+      `${BASE_URL}/api/comment/add`
+        + `?postId=${this.currentPostId}`
+        + `&userId=${userId}`
+        + `&content=${encodeURIComponent(content)}`,
+      {
+        method: http.RequestMethod.POST
+      }
+    )
+
+
+    // 清空输入框
+    this.commentInput = ''
+
+    // ✅ fetchComments 需要参数
+    this.fetchComments(String(this.currentPostId))
+  }
+
+  async deleteComment(item: CommentItem) {
+    try {
+      const httpRequest = http.createHttp()
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext
+      const userInfo = await loadUserInfo(ctx)
+      const userId = Number(userInfo.id)
+
+      const resp = await httpRequest.request(
+        `${BASE_URL}/api/comment/delete?commentId=${item.id}&userId=${userId}`,
+        {
+          method: http.RequestMethod.DELETE
+        }
+      )
+
+      const data = JSON.parse(resp.result as string) as BaseResponse
+
+      if (!data.success) {
+        console.warn(data.msg)
+        return
+      }
+
+      // ⭐ 关键：前端立即移除
+      this.comments = this.comments.filter(c => c.id !== item.id)
+
+    } catch (e) {
+      console.error('删除评论失败', e)
+    }
+  }
+
+  openComment(postId: number) {
+    this.currentPostId = postId
+    this.showCommentPanel = true
+
+    // ⭐⭐ 关键：打开时立即获取评论
+    this.fetchComments(String(postId))
+  }
+
+
 
   aboutToAppear() {
     this.loadUserNameFromDB();
@@ -587,11 +770,19 @@ struct HomePage {
 
                       Text(`💬 评论${post.comments}`)
                         .fontColor('#666666')
-                        .fontSize(13);
+                        .fontSize(13)
+                        .onClick(() => {
+                          this.currentPost = post
+                          this.showCommentPanel = true
+                          this.openComment(Number(post.id))
+                        });
 
                       Text('↗ 分享')
                         .fontColor('#666666')
-                        .fontSize(13);
+                        .fontSize(13)
+                        .onClick(() => {
+                          this.showShare = true
+                        })
                     }
                     .margin({ top: 8 })
                   }
@@ -1053,11 +1244,19 @@ struct HomePage {
 
                         Text(`💬 评论${post.comments}`)
                           .fontColor('#666666')
+                          .onClick(() => {
+                            this.currentPost = post
+                            this.showCommentPanel = true
+                            this.openComment(Number(post.id))
+                          })
                           .fontSize(13);
 
                         Text('↗ 分享')
                           .fontColor('#666666')
-                          .fontSize(13);
+                          .fontSize(13)
+                          .onClick(() => {
+                            this.showShare = true
+                          });
                       }
                       .margin({ top: 8 })
                     }
@@ -1134,6 +1333,153 @@ struct HomePage {
       .backgroundColor('#F5F5F5')
       .justifyContent(FlexAlign.SpaceAround)
       .margin({top:850})
+
+
+      if (this.showShare) {
+        // Mask
+        Column()
+          .width('100%')
+          .height('100%')
+          .backgroundColor('#66000000')
+          .onClick(() => {
+            this.showShare = false
+          })
+
+        // 底部分享面板
+        Column({ space: 20 }) {
+          Grid() {
+            GridItem(){
+              ShareItem('邮件', $r('app.media.youjian'))
+            }
+            GridItem(){
+              ShareItem('微信好友', $r('app.media.weix'))
+            }
+            GridItem(){
+              ShareItem('微博', $r('app.media.weibo'))
+            }
+            GridItem(){
+              ShareItem('QQ好友', $r('app.media.qq'))
+            }
+            GridItem(){
+              ShareItem('更多', $r('app.media.gduo'))
+            }
+
+          }
+          .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
+          .rowsGap(20)
+          .height(180)
+
+          Divider()
+
+          Text('取消')
+            .fontSize(18)
+            .fontColor('#333')
+            .padding(12)
+            .onClick(() => {
+              this.showShare = false
+            })
+        }
+        .width('100%')
+        .padding(20)
+        .backgroundColor(Color.White)
+        .borderRadius({ topLeft: 16, topRight: 16 })
+        .position({ y: '65%' })   // 控制面板高度
+      }
+      if (this.showCommentPanel) {
+        Stack() {
+
+          // ===== 遮罩 =====
+          Rect()
+            .fill('#66000000')
+            .width('100%')
+            .height('100%')
+            .onClick(() => this.closeComment())
+
+          // ===== 评论面板 =====
+          Column() {
+
+            // —— Header ——
+            Row() {
+              Text('评论')
+                .fontSize(18)
+                .fontWeight(FontWeight.Medium)
+
+              Blank()
+
+              Text('  ✕')
+                .fontSize(20)
+                .onClick(() => this.closeComment())
+            }
+            .padding(16)
+            .border({ width: { bottom: 1 }, color: '#eee' })
+
+            // —— 内容区（关键）——
+            Column() {
+
+              if (this.comments.length === 0) {
+                // 空评论状态
+                Column() {
+                  Text('现在还没有评论哦')
+                    .fontSize(14)
+                    .fontColor('#999')
+                }
+                .justifyContent(FlexAlign.Center)
+                .alignItems(HorizontalAlign.Center)
+                .layoutWeight(1)
+              } else {
+                // 评论列表
+                Scroll() {
+                  Column({ space: 12 }) {
+                    ForEach(this.comments, (item: CommentItem) => {
+                      this.CommentItemView(item)
+                    })
+                  }
+                  .padding(16)
+                }
+                .layoutWeight(1)
+              }
+
+            }
+            .layoutWeight(1)
+
+            // —— 输入区 ——
+            Row({ space: 8 }) {
+              TextInput({
+                placeholder: '说点什么吧…'
+              })
+                .onChange((value: string) => {
+                  this.commentInput = value
+                })
+                .height(40)
+                .borderRadius(20)
+                .backgroundColor('#F5F5F5')
+                .padding({ left: 12 })
+                .layoutWeight(1)
+
+
+              Text('发送')
+                .fontSize(14)
+                .fontColor(this.commentInput.trim() ? Color.Blue : '#999')
+                .onClick(() => {
+                  if (!this.commentInput.trim()) return
+                  this.sendComment()
+                })
+            }
+            .padding(12)
+            .border({ width: { top: 1 }, color: '#eee' })
+
+          }
+          .width('100%')
+          .height('90%')
+          .backgroundColor(Color.White)
+          .borderRadius({ topLeft: 16, topRight: 16 })
+          .onClick(() => {}) // ⭐ 阻断点击穿透
+          .align(Alignment.Bottom)
+
+        }
+      }
+
+
     }
     .width('100%')
     .height('80%')
@@ -1141,4 +1487,25 @@ struct HomePage {
   }
 
 }
+
+
+@Builder
+function ShareItem(name: string, icon: Resource, onClick?: () => void) {
+  Column({ space: 8 }) {
+    Image(icon)
+      .width(56)
+      .height(56)
+      .borderRadius(28)
+
+    Text(name)
+      .fontSize(12)
+      .fontColor('#333')
+  }
+  .onClick(() => {
+    onClick && onClick()
+  })
+  .alignItems(HorizontalAlign.Center)
+}
+
+
 

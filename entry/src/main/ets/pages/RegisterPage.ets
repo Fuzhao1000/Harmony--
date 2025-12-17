@@ -37,7 +37,7 @@ struct RegisterPage {
     const httpRequest = http.createHttp();
     try {
       const response: http.HttpResponse = await httpRequest.request(
-        "http://10.205.218.246:8080/api/register",
+        `$\{BASE_URL}/api/register`,
         {
           method: http.RequestMethod.POST,
           header: { "Content-Type": "application/json" },

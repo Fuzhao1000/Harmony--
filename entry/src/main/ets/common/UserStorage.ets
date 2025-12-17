@@ -3,6 +3,8 @@ import dataPreferences from '@ohos.data.preferences';
 import common from '@ohos.app.ability.common';
 import http from '@ohos.net.http';
 import util from '@ohos.util';
+import { BASE_URL } from '../pages/ip';
+
 const STORE_NAME = "user_store";
 
 export interface LoginResponse {
@@ -26,7 +28,7 @@ export async function checkUser(phone: string, password: string): Promise<LoginR
 
   try {
     const response = await httpRequest.request(
-      "http://10.205.218.246:8080/api/login",
+      `${BASE_URL}/api/login`,
       {
         method: http.RequestMethod.POST,
         header: { "Content-Type": "application/json" },

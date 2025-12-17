@@ -5,6 +5,8 @@ import router from '@ohos.router';
 import { LoginResponse } from '../common/UserStorage';
 import preferences from '@ohos.data.preferences';
 
+import { BASE_URL } from '../pages/ip';
+
 interface UserInfo {
   id: string;  // 存储后为字符串
   name: string;
