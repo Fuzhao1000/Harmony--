@@ -59,4 +59,9 @@ public class UserService {
         userRepository.save(user);
         return true;
     }
+    
+    // 根据ID获取用户
+    public User getUserById(Long id) {
+        return userRepository.findById(id).orElse(null);
+    }
 }

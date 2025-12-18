@@ -13,6 +13,13 @@ public class User {
     private String phone;
     private String password;
     private String name;
+    
+    // 关注数
+    private Integer followingCount = 0;
+    
+    // 粉丝数
+    private Integer followerCount = 0;
+    
     public Long getId() {
         return id;
     }
@@ -39,6 +46,22 @@ public class User {
 
     public void setName(String name) {
         this.name = name;
+    }
+    
+    public Integer getFollowingCount() {
+        return followingCount;
+    }
+    
+    public void setFollowingCount(Integer followingCount) {
+        this.followingCount = followingCount;
+    }
+    
+    public Integer getFollowerCount() {
+        return followerCount;
+    }
+    
+    public void setFollowerCount(Integer followerCount) {
+        this.followerCount = followerCount;
     }
 
 }

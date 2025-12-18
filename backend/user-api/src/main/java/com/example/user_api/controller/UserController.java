@@ -46,6 +46,8 @@ public class UserController {
             res.put("message", "登录成功");
             res.put("id", user.getId());    // ✅ 返回用户ID
             res.put("name", user.getName()); // ✅ 返回用户名
+            res.put("followingCount", user.getFollowingCount() != null ? user.getFollowingCount() : 0); // 返回关注数
+            res.put("followerCount", user.getFollowerCount() != null ? user.getFollowerCount() : 0); // 返回粉丝数
             logger.info("返回的用户 id={} name={}", user.getId(), user.getName());
         }
 
@@ -60,6 +62,26 @@ public class UserController {
 
         boolean ok = userService.updateName(id, name);
         res.put("success", ok);
+        return res;
+    }
+    
+    @GetMapping("/user/{id}")
+    public Map<String, Object> getUserById(@PathVariable Long id) {
+        Map<String, Object> res = new HashMap<>();
+        
+        User user = userService.getUserById(id);
+        
+        if (user != null) {
+            res.put("success", true);
+            res.put("id", user.getId());
+            res.put("name", user.getName());
+            res.put("followingCount", user.getFollowingCount() != null ? user.getFollowingCount() : 0);
+            res.put("followerCount", user.getFollowerCount() != null ? user.getFollowerCount() : 0);
+        } else {
+            res.put("success", false);
+            res.put("message", "用户不存在");
+        }
+        
         return res;
     }
 

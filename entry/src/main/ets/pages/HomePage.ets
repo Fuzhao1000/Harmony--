@@ -21,6 +21,7 @@ interface PostItem {
   id:string
   baname:string
   user: string
+  userId?: number
   createTime: number
   content: string
   image?: string
@@ -28,6 +29,7 @@ interface PostItem {
   comments: number
   liked?: boolean;
   favorited?: boolean;
+  isFollowing?: boolean; // 是否已关注该帖子作者
 }
 
 interface ForumItem {
@@ -50,10 +52,17 @@ interface UpdateNameResponse {
   message?: string;
 }
 
+interface UserInfo {
+  id: number;
+  name: string;
+  avatar?: string;
+}
+
 interface UserInfoResponse {
   success: boolean;
-  name: string;
-  // 如果还有其他字段也一起加上
+  name?: string;
+  user?: UserInfo;
+  message?: string;
 }
 
 interface PostListResponse {
@@ -77,6 +86,25 @@ interface LikeListResponse {
   likedPostIds: number[];
 }
 
+interface FollowResponse {
+  success: boolean;
+  isFollowing: boolean;
+  message: string;
+  followerFollowingCount?: number;
+  followingFollowerCount?: number;
+}
+
+interface FollowStatsResponse {
+  success: boolean;
+  followingCount: number;
+  followerCount: number;
+}
+
+interface FollowCheckResponse {
+  success: boolean;
+  isFollowing: boolean;
+}
+
 interface CommentItem {
   id: number
   postId: string
@@ -86,12 +114,20 @@ interface CommentItem {
   isMine?: boolean
   userName?: string
   avatar?: string
+  likes?: number
+  liked?: boolean
 }
 
 interface CommentListResponse {
   success: boolean
   comments: CommentItem[]
   message?: string
+}
+
+interface CommentLikeResponse {
+  success: boolean
+  liked: boolean
+  likes: number
 }
 
 interface SendCommentResponse {
@@ -103,6 +139,77 @@ interface SendCommentResponse {
 interface BaseResponse {
   success: boolean
   msg?: string
+}
+
+interface BarStat {
+  baname: string
+  postCount: number
+  memberCount: number
+}
+
+interface BarStatsResponse {
+  success: boolean
+  stats: BarStat[]
+}
+
+interface UpdatePostData {
+  id: string
+  content: string
+  baname: string
+}
+
+interface UpdatePostResponse {
+  success: boolean
+  post?: PostItem
+  message?: string
+}
+
+interface DeletePostResponse {
+  success: boolean
+  message?: string
+}
+
+interface MessageUser {
+  id: number
+  name: string
+  avatar?: string
+  lastMessage?: string
+  lastTime?: number
+  unreadCount?: number
+}
+
+interface FollowListResponse {
+  success: boolean;
+  users: MessageUser[];
+  message?: string;
+}
+
+interface UnreadCountResponse {
+  success: boolean;
+  count: number;
+}
+
+interface LatestMessageItem {
+  content: string;
+  createTime: number;
+}
+
+interface LatestMessageResponse {
+  success: boolean;
+  message?: LatestMessageItem;
+}
+
+interface ConversationItem {
+  userId: string | number;  // 后端可能返回String
+  lastMessage: string;
+  lastMessageTime: number;
+  unreadCount: number;
+}
+
+interface ConversationsResponse {
+  success: boolean;
+  conversations: ConversationItem[];
+  message?: string;
 }
 
 @Entry
@@ -120,6 +227,9 @@ struct HomePage {
   @StorageLink('posts') posts: PostItem[] = []
   @State loading: boolean = false;
   @State publishing: boolean = false
+  @State searchKeyword: string = ''  // 搜索关键词
+  @State filteredPosts: PostItem[] = []  // 搜索过滤后的帖子
+  @State isSearching: boolean = false  // 是否处于搜索状态
   @State favoritePosts: PostItem[] = [];
   @State showShare: boolean = false
   @State forums: ForumItem[] = [
@@ -138,7 +248,7 @@ struct HomePage {
     {
       baname: "bilibili吧",
       members: 0,
-      posts: 1,
+      posts: 0,
       icon: $r('app.media.bilibili')
     },
   {
@@ -159,35 +269,115 @@ struct HomePage {
   @State currentPostId: number = 0   // 当前正在评论的帖子
   @State comments: CommentItem[] = []
   @State commentInput: string = ''
+  private commentInputController: TextInputController = new TextInputController()
 
   @State userId: number = 0
+  @State followingCount: number = 0  // 关注数
+  @State followerCount: number = 0   // 粉丝数
+  @State favoriteCount: number = 0   // 收藏数
+  
+  // 编辑帖子相关状态
+  @State showEditDialog: boolean = false
+  @State editingPost: PostItem | null = null
+  @State editContent: string = ''
+  @State editBaname: string = ''
+  
+  // 消息相关状态
+  @State messageUsers: MessageUser[] = []  // 消息列表（关注的好友）
+
+  // 搜索帖子方法
+  searchPosts() {
+    if (this.searchKeyword.trim() === '') {
+      this.isSearching = false;
+      this.filteredPosts = [];
+      return;
+    }
+    
+    this.isSearching = true;
+    const keyword = this.searchKeyword.toLowerCase().trim();
+    
+    // 过滤包含关键词的帖子（匹配内容或用户名）
+    this.filteredPosts = this.posts.filter(post => 
+      post.content.toLowerCase().includes(keyword) ||
+      (post.user && post.user.toLowerCase().includes(keyword)) ||
+      post.baname.toLowerCase().includes(keyword)
+    );
+  }
+  
+  // 清除搜索
+  clearSearch() {
+    this.searchKeyword = '';
+    this.isSearching = false;
+    this.filteredPosts = [];
+  }
 
   @Builder
   CommentItemView(item: CommentItem) {
-    Row({ space: 12 }) {
-      Image(item.avatar ?? $r('app.media.head'))
-        .width(36)
-        .height(36)
-        .borderRadius(18)
+    Column() {
+      Column({ space: 10 }) {
+        // 用户信息行
+        Row({ space: 10 }) {
+          // 头像
+          Image(item.avatar ?? $r('app.media.head'))
+            .width(40)
+            .height(40)
+            .borderRadius(20)
 
-      Column({ space: 4 }) {
-        Text(item.userName)
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
+          Column({ space: 4 }) {
+            // 用户名
+            Text(item.userName || '匿名用户')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#333333')
 
+            // 评论时间
+            Text(this.formatTime(item.createTime))
+              .fontSize(12)
+              .fontColor('#999999')
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          // 删除按钮
+          if (item.isMine) {
+            Text('删除')
+              .fontColor('#ff6b6b')
+              .fontSize(13)
+              .onClick(() => this.deleteComment(item))
+          }
+        }
+        .width('100%')
+
+        // 评论内容
         Text(item.content)
-          .fontSize(13)
-      }
+          .fontSize(15)
+          .lineHeight(22)
+          .fontColor('#333333')
+          .width('100%')
+          .padding({ left: 50 })
 
-      Blank()
-
-      if (item.isMine) {
-        Text('删除')
-          .fontColor(Color.Red)
-          .fontSize(12)
-          .onClick(() => this.deleteComment(item))
+        // 点赞
+        Row({ space: 6 }) {
+          Text(item.liked ? '❤' : '♡')
+            .fontSize(16)
+            .fontColor(item.liked ? '#ff6b6b' : '#999')
+          Text((item.likes || 0).toString())
+            .fontSize(13)
+            .fontColor(item.liked ? '#ff6b6b' : '#999')
+        }
+        .padding({ left: 50 })
+        .onClick(() => this.toggleCommentLike(item))
       }
+      .width('100%')
+      .padding({ top: 12, bottom: 12, left: 16, right: 16 })
+
+      // 分隔线
+      Divider()
+        .strokeWidth(1)
+        .color('#e8e8e8')
     }
+    .width('100%')
+    .backgroundColor(Color.White)
   }
 
   async pickImageFromGallery() {
@@ -241,6 +431,9 @@ struct HomePage {
     const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
     const userInfo = await loadUserInfo(currentContext);
     const userId: number = parseInt(userInfo.id, 10) || 0;
+    
+    // 保存到实例变量，供评论点赞等功能使用
+    this.userId = userId;
 
     if (!userId) {
       console.error("未登录或用户ID丢失");
@@ -274,6 +467,9 @@ struct HomePage {
         this.userName = data.name;
         // 只有服务器返回成功且有名字，才同步到本地
         await saveUserName(this.userName, currentContext);
+        
+        // 加载关注和粉丝数据
+        await this.loadFollowStats();
       } else {
         // 服务器返回了但数据不完整 → 保留本地已有名字
         console.warn("服务器返回异常，使用本地名字:", userInfo.name);
@@ -290,8 +486,202 @@ struct HomePage {
     }
   }
 
+  // 加载关注和粉丝数据
+  async loadFollowStats() {
+    if (!this.userId) return;
+    
+    try {
+      const httpRequest = http.createHttp();
+      const response = await httpRequest.request(
+        `${BASE_URL}/api/follow/stats?userId=${this.userId}`,
+        { method: http.RequestMethod.GET }
+      );
+
+      let text = typeof response.result === "string"
+        ? response.result
+        : new util.TextDecoder("utf-8").decode(response.result as Uint8Array);
+
+      const data = JSON.parse(text) as FollowStatsResponse;
+
+      if (data.success) {
+        this.followingCount = data.followingCount || 0;
+        this.followerCount = data.followerCount || 0;
+        console.log(`关注数: ${this.followingCount}, 粉丝数: ${this.followerCount}`);
+      }
+      
+      httpRequest.destroy();
+      
+      // 同时加载收藏数
+      await this.loadFavoriteCount();
+    } catch (e) {
+      console.error('加载关注粉丝数据失败:', e);
+    }
+  }
+
+  // 加载收藏数
+  async loadFavoriteCount() {
+    if (!this.userId) return;
+    
+    try {
+      const httpRequest = http.createHttp();
+      const response = await httpRequest.request(
+        `${BASE_URL}/api/favorite/list?userId=${this.userId}`,
+        { method: http.RequestMethod.GET }
+      );
+
+      let text = typeof response.result === "string"
+        ? response.result
+        : new util.TextDecoder("utf-8").decode(response.result as Uint8Array);
+
+      const data = JSON.parse(text) as FavoriteResponse;
+
+      if (data.success) {
+        this.favoriteCount = data.favoritePostIds?.length || 0;
+        console.log(`收藏数: ${this.favoriteCount}`);
+      }
+      
+      httpRequest.destroy();
+    } catch (e) {
+      console.error('加载收藏数失败:', e);
+    }
+  }
+
+  // 加载消息列表（关注的好友）
+  async loadMessageUsers() {
+    if (!this.userId) return;
+    
+    try {
+      const httpRequest = http.createHttp();
+      // 使用conversations接口获取所有聊天会话（包括粉丝发来的消息）
+      const response = await httpRequest.request(
+        `${BASE_URL}/api/message/conversations?userId=${this.userId}`,
+        { method: http.RequestMethod.GET }
+      );
+
+      let text = typeof response.result === "string"
+        ? response.result
+        : new util.TextDecoder("utf-8").decode(response.result as Uint8Array);
+
+      const data = JSON.parse(text) as ConversationsResponse;
+
+      if (data.success && data.conversations && data.conversations.length > 0) {
+        // 为每个会话用户获取详细信息
+        const usersWithMessages = await Promise.all(data.conversations.map(async (conv): Promise<MessageUser | null> => {
+          try {
+            // 转换userId为number类型
+            const convUserId: number = typeof conv.userId === 'string' ? parseInt(conv.userId) : conv.userId;
+            
+            // 获取用户详细信息
+            const userResp = await http.createHttp().request(
+              `${BASE_URL}/api/user/${convUserId}`,
+              { method: http.RequestMethod.GET }
+            );
+            const userText = typeof userResp.result === "string"
+              ? userResp.result
+              : new util.TextDecoder("utf-8").decode(userResp.result as Uint8Array);
+            const userData = JSON.parse(userText) as UserInfoResponse;
+            
+            if (userData.success) {
+              // 支持两种返回格式：直接返回name或者返回user对象
+              const userName = userData.user?.name || userData.name || '未知用户';
+              const userAvatar = userData.user?.avatar || '';
+              
+              return {
+                id: convUserId,
+                name: userName,
+                avatar: userAvatar,
+                lastMessage: conv.lastMessage || '暂无消息',
+                lastTime: conv.lastMessageTime || Date.now(),
+                unreadCount: conv.unreadCount || 0
+              };
+            }
+          } catch (e) {
+            console.error(`获取用户${conv.userId}信息失败:`, e);
+          }
+          return null;
+        }));
+        
+        // 过滤掉获取失败的用户
+        this.messageUsers = usersWithMessages.filter((user) => user !== null) as MessageUser[];
+        console.log(`加载了 ${this.messageUsers.length} 个会话`);
+      } else {
+        // 如果没有会话，清空列表
+        this.messageUsers = [];
+        console.log('暂无会话记录');
+      }
+      
+      httpRequest.destroy();
+    } catch (e) {
+      console.error('加载消息列表失败:', e);
+    }
+  }
+
   generatePostId(): string {
     return Date.now().toString();
+  }
+
+  // 切换关注状态
+  async toggleFollow(post: PostItem) {
+    if (!post.userId || post.userId === this.userId) {
+      return; // 不能关注自己
+    }
+
+    try {
+      const httpRequest = http.createHttp();
+      
+      const resp = await httpRequest.request(
+        `${BASE_URL}/api/follow/toggle?followerId=${this.userId}&followingId=${post.userId}`,
+        { method: http.RequestMethod.POST }
+      );
+      
+      const text = typeof resp.result === "string"
+        ? resp.result
+        : new util.TextDecoder("utf-8").decode(resp.result as Uint8Array);
+      
+      const data = JSON.parse(text) as FollowResponse;
+      
+      if (data.success) {
+        // 更新本地状态 - 更新该用户的所有帖子
+        this.posts = this.posts.map(p => {
+          if (p.userId === post.userId) {
+            const updatedPost: PostItem = {
+              id: p.id,
+              baname: p.baname,
+              user: p.user,
+              userId: p.userId,
+              createTime: p.createTime,
+              content: p.content,
+              image: p.image,
+              likes: p.likes,
+              comments: p.comments,
+              liked: p.liked,
+              favorited: p.favorited,
+              isFollowing: data.isFollowing
+            };
+            return updatedPost;
+          }
+          return p;
+        });
+        
+        // 更新自己的关注数
+        if (data.isFollowing) {
+          this.followingCount++;
+        } else {
+          this.followingCount = Math.max(0, this.followingCount - 1);
+        }
+        
+        promptAction.showToast({ 
+          message: data.isFollowing ? '关注成功' : '取消关注' 
+        });
+      } else {
+        promptAction.showToast({ message: data.message || '操作失败' });
+      }
+      
+      httpRequest.destroy();
+    } catch (e) {
+      console.error("关注操作错误", e);
+      promptAction.showToast({ message: '操作失败' });
+    }
   }
 
   async toggleLike(post: PostItem) {
@@ -308,19 +698,30 @@ struct HomePage {
         }
       );
 
-
       const data = JSON.parse(resp.result as string) as LikeResponse;
 
-
-        post.liked = data.liked;
-        post.likes = data.likes;
-  if (this.currentTab === 'home') {
-    await this.fetchPosts()
-  }
-  else if (this.currentTab === 'favorite')
-  {
-    await this.fetchFavoritePosts()
-  }
+      if (data.success) {
+        // 创建新的posts数组，更新指定帖子的点赞状态
+        this.posts = this.posts.map(p => {
+          if (p.id === post.id) {
+            const newPost: PostItem = {
+              id: p.id,
+              baname: p.baname,
+              user: p.user,
+              userId: p.userId,
+              createTime: p.createTime,
+              content: p.content,
+              image: p.image,
+              likes: data.likes,
+              comments: p.comments,
+              liked: data.liked,
+              favorited: p.favorited
+            };
+            return newPost;
+          }
+          return p;
+        });
+      }
     } catch (e) {
       console.error("点赞错误", e);
     }
@@ -328,10 +729,15 @@ struct HomePage {
 
   async onPublishClick() {
     try {
+      // 获取当前用户ID
+      const currentContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const userInfo = await loadUserInfo(currentContext);
+      const userId = parseInt(userInfo.id, 10) || 0;
 
       const postData: PostItem = {
         id: this.generatePostId(),
         user: this.userName,
+        userId: userId,
         content: this.content,
         baname: this.selectedBa,
         createTime: Date.now(),
@@ -345,7 +751,7 @@ struct HomePage {
       // 3. 发送 POST 请求
       const httpRequest = http.createHttp();
       const response = await httpRequest.request(
-        '${BASE_URL}/api/post/publish',
+        `${BASE_URL}/api/post/publish`,
         {
           method: http.RequestMethod.POST,
           header: { 'Content-Type': 'application/json' },
@@ -366,6 +772,7 @@ struct HomePage {
           // 切换回首页并刷新帖子
           this.currentTab = 'home';
           await this.fetchPosts();
+          await this.fetchBarStats();
 
       } else {
         console.error('发布失败',  JSON.stringify(response));
@@ -375,6 +782,102 @@ struct HomePage {
     } catch (err) {
       console.error("发布出错：", JSON.stringify(err));
       Prompt.showToast({ message: "网络错误" });
+    }
+  }
+
+  // 打开编辑对话框
+  openEditDialog(post: PostItem) {
+    this.editingPost = post;
+    this.editContent = post.content;
+    this.editBaname = post.baname;
+    this.showEditDialog = true;
+  }
+
+  // 保存编辑
+  async saveEdit() {
+    if (!this.editingPost || !this.editContent.trim()) {
+      promptAction.showToast({ message: '内容不能为空' });
+      return;
+    }
+
+    try {
+      const httpRequest = http.createHttp();
+      
+      const updateData: UpdatePostData = {
+        id: this.editingPost.id,
+        content: this.editContent,
+        baname: this.editBaname
+      };
+
+      const response = await httpRequest.request(
+        `${BASE_URL}/api/post/update?userId=${this.userId}`,
+        {
+          method: http.RequestMethod.PUT,
+          header: { 'Content-Type': 'application/json' },
+          extraData: JSON.stringify(updateData)
+        }
+      );
+
+      let text = typeof response.result === "string"
+        ? response.result
+        : new util.TextDecoder("utf-8").decode(response.result as Uint8Array);
+
+      const data = JSON.parse(text) as UpdatePostResponse;
+
+      if (data.success) {
+        promptAction.showToast({ message: '编辑成功' });
+        this.showEditDialog = false;
+        await this.fetchPosts();
+      } else {
+        promptAction.showToast({ message: data.message || '编辑失败' });
+      }
+
+      httpRequest.destroy();
+    } catch (e) {
+      console.error('编辑帖子失败:', e);
+      promptAction.showToast({ message: '网络错误' });
+    }
+  }
+
+  // 删除帖子
+  async deletePost(post: PostItem) {
+    try {
+      const result = await promptAction.showDialog({
+        title: '确认删除',
+        message: '确定要删除这条帖子吗？',
+        buttons: [
+          { text: '取消', color: '#666666' },
+          { text: '删除', color: '#FF0000' }
+        ]
+      });
+
+      if (result.index !== 1) return;
+
+      const httpRequest = http.createHttp();
+      
+      const response = await httpRequest.request(
+        `${BASE_URL}/api/post/delete?postId=${post.id}&userId=${this.userId}`,
+        { method: http.RequestMethod.DELETE }
+      );
+
+      let text = typeof response.result === "string"
+        ? response.result
+        : new util.TextDecoder("utf-8").decode(response.result as Uint8Array);
+
+      const data = JSON.parse(text) as DeletePostResponse;
+
+      if (data.success) {
+        promptAction.showToast({ message: '删除成功' });
+        await this.fetchPosts();
+        await this.fetchBarStats();
+      } else {
+        promptAction.showToast({ message: data.message || '删除失败' });
+      }
+
+      httpRequest.destroy();
+    } catch (e) {
+      console.error('删除帖子失败:', e);
+      promptAction.showToast({ message: '网络错误' });
     }
   }
 
@@ -416,11 +919,30 @@ struct HomePage {
       const likedSet = new Set(likeData.likedPostIds ?? []);
 
 
-      // 4. 生成前端需要的 PostItem 数组，并标记 favorited
-      this.posts = postData.posts.map((post) => {
+      // 4. 生成前端需要的 PostItem 数组，并标记 favorited 和 isFollowing
+      this.posts = await Promise.all(postData.posts.map(async (post) => {
+        // 检查是否关注了该用户
+        let isFollowing = false;
+        if (post.userId && post.userId !== userId) {
+          try {
+            const followResp = await http.createHttp().request(
+              `${BASE_URL}/api/follow/check?followerId=${userId}&followingId=${post.userId}`,
+              { method: http.RequestMethod.GET }
+            );
+            const followText = typeof followResp.result === "string"
+              ? followResp.result
+              : new util.TextDecoder("utf-8").decode(followResp.result as Uint8Array);
+            const followData = JSON.parse(followText) as FollowCheckResponse;
+            isFollowing = followData.isFollowing || false;
+          } catch (e) {
+            console.error('检查关注状态失败:', e);
+          }
+        }
+        
         const p: PostItem = {
           id: post.id,
           user: post.user,
+          userId: post.userId,  // ★ 保留userId字段用于编辑删除权限判断
           content: post.content,
           baname: post.baname,
           createTime: post.createTime,
@@ -428,10 +950,11 @@ struct HomePage {
           likes: post.likes ?? 0,
           comments: post.comments ?? 0,
           liked: likedSet.has(Number(post.id)),
-          favorited: favSet.has(Number(post.id))   // ★ 标记已收藏
+          favorited: favSet.has(Number(post.id)),   // ★ 标记已收藏
+          isFollowing: isFollowing  // ★ 标记关注状态
         };
         return p;
-      });
+      }));
 
      // console.log("加载帖子成功：", JSON.stringify(this.posts, null, 2));
      // console.log("eeeee：", JSON.stringify(favSet, null, 2));
@@ -474,6 +997,7 @@ struct HomePage {
         const p: PostItem = {
           id: post.id,
           user: post.user,
+          userId: post.userId,  // ★ 保留userId字段用于编辑删除权限判断
           content: post.content,
           baname: post.baname,
           createTime: post.createTime,
@@ -499,6 +1023,31 @@ struct HomePage {
     const pad = (n: number) => n.toString().padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ` +
       `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  // 格式化消息时间（显示更友好的时间）
+  formatMessageTime(timestamp?: number): string {
+    if (!timestamp) return '';
+    
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    
+    if (diff < minute) {
+      return '刚刚';
+    } else if (diff < hour) {
+      return `${Math.floor(diff / minute)}分钟前`;
+    } else if (diff < day) {
+      return `${Math.floor(diff / hour)}小时前`;
+    } else if (diff < 7 * day) {
+      return `${Math.floor(diff / day)}天前`;
+    } else {
+      const date = new Date(timestamp);
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      return `${date.getMonth()+1}-${pad(date.getDate())}`;
+    }
   }
 
   async toggleFavorite(post: PostItem) {
@@ -528,7 +1077,7 @@ struct HomePage {
         post.favorited = !post.favorited;
 
         prompt.showToast({
-          message: post.favorited ? '收藏成功 ❤️' : '已取消收藏 ♡'
+          message: post.favorited ? '收藏成功 ★ ' : '已取消收藏 ☆ '
         });
 
         if(this.currentTab === 'favorite'){
@@ -553,10 +1102,9 @@ struct HomePage {
 
   try {
     const response = await httpRequest.request(
-      `${BASE_URL}/api/comment/list`,
+      `${BASE_URL}/api/comment/list?postId=${postId}&userId=${this.userId}`,
       {
-        method: http.RequestMethod.GET,
-        extraData: { postId }
+        method: http.RequestMethod.GET
       }
     )
 
@@ -571,6 +1119,8 @@ struct HomePage {
         avatar: item.avatar,
         content: item.content,
         createTime: item.createTime,
+        likes: item.likes || 0,
+        liked: item.liked || false,
         isMine: Number(item.userId) === this.userId
       }
       return comment
@@ -614,37 +1164,130 @@ struct HomePage {
 
     // 清空输入框
     this.commentInput = ''
+    // 让键盘消失
+    this.commentInputController.stopEditing()
 
     // ✅ fetchComments 需要参数
     this.fetchComments(String(this.currentPostId))
   }
 
+  async toggleCommentLike(comment: CommentItem) {
+    try {
+      console.log('点击评论点赞, userId:', this.userId, 'commentId:', comment.id);
+      
+      const httpRequest = http.createHttp();
+      
+      const resp = await httpRequest.request(
+        `${BASE_URL}/api/comment/toggleLike?userId=${this.userId}&commentId=${comment.id}`,
+        { method: http.RequestMethod.POST }
+      );
+      
+      const text = typeof resp.result === "string"
+        ? resp.result
+        : JSON.stringify(resp.result);
+      
+      console.log('点赞响应:', text);
+      
+      const data = JSON.parse(text) as CommentLikeResponse;
+      
+      if (data.success) {
+        comment.liked = data.liked;
+        comment.likes = data.likes;
+        console.log('点赞成功, liked:', data.liked, 'likes:', data.likes);
+        // 强制刷新评论列表以更新UI
+        this.comments = [...this.comments];
+      }
+      
+      httpRequest.destroy();
+    } catch (e) {
+      console.error("评论点赞错误", JSON.stringify(e));
+    }
+  }
+
+  async fetchBarStats() {
+    try {
+      const httpRequest = http.createHttp();
+      const response = await httpRequest.request(
+        `${BASE_URL}/api/post/barStats`,
+        { method: http.RequestMethod.GET }
+      );
+
+      let text = typeof response.result === "string"
+        ? response.result
+        : new util.TextDecoder("utf-8").decode(response.result as Uint8Array);
+
+      const data = JSON.parse(text) as BarStatsResponse;
+
+      if (data.success && data.stats) {
+        // 更新已有的forums数据
+        this.forums = this.forums.map(forum => {
+          const stat = data.stats.find(s => s.baname === forum.baname);
+          if (stat) {
+            return {
+              baname: forum.baname,
+              posts: stat.postCount,
+              members: stat.memberCount,
+              icon: forum.icon
+            };
+          }
+          return forum;
+        });
+      }
+
+      httpRequest.destroy();
+    } catch (e) {
+      console.error('获取吧统计信息失败:', e);
+    }
+  }
+
   async deleteComment(item: CommentItem) {
     try {
+      console.log('开始删除评论, item.id:', item.id, 'item.userId:', item.userId, 'this.userId:', this.userId)
+      
+      // 显示确认对话框
+      const confirmResult = await promptAction.showDialog({
+        title: '确认删除',
+        message: '确定要删除这条评论吗？',
+        buttons: [
+          { text: '取消', color: '#666666' },
+          { text: '删除', color: '#FF0000' }
+        ]
+      });
+
+      if (confirmResult.index !== 1) return;
+      
       const httpRequest = http.createHttp()
       const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext
       const userInfo = await loadUserInfo(ctx)
       const userId = Number(userInfo.id)
+      
+      console.log('从本地获取的userId:', userId)
 
-      const resp = await httpRequest.request(
-        `${BASE_URL}/api/comment/delete?commentId=${item.id}&userId=${userId}`,
-        {
-          method: http.RequestMethod.DELETE
-        }
-      )
+      const url = `${BASE_URL}/api/comment/delete?commentId=${item.id}&userId=${userId}`
+      console.log('请求URL:', url)
+      
+      const resp = await httpRequest.request(url, {
+        method: http.RequestMethod.POST
+      })
+      
+      console.log('删除响应:', resp.result)
 
       const data = JSON.parse(resp.result as string) as BaseResponse
 
       if (!data.success) {
-        console.warn(data.msg)
+        console.warn('删除失败:', data.msg)
+        prompt.showToast({ message: '删除失败: ' + (data.msg || '未知错误') })
         return
       }
 
       // ⭐ 关键：前端立即移除
       this.comments = this.comments.filter(c => c.id !== item.id)
+      prompt.showToast({ message: '删除成功' })
+      console.log('评论已从列表移除')
 
     } catch (e) {
-      console.error('删除评论失败', e)
+      console.error('删除评论失败', JSON.stringify(e))
+      prompt.showToast({ message: '删除失败，请重试' })
     }
   }
 
@@ -661,6 +1304,14 @@ struct HomePage {
   aboutToAppear() {
     this.loadUserNameFromDB();
     this.fetchPosts();
+    this.fetchBarStats();
+  }
+
+  onPageShow() {
+    // 页面显示时，如果在消息tab，刷新消息列表（从聊天页面返回时）
+    if (this.currentTab === 'message') {
+      this.loadMessageUsers();
+    }
   }
 
   build() {
@@ -682,14 +1333,38 @@ struct HomePage {
               .height(24)
               .margin({ left: 10 })
 
-            Text("在此输入")
-              .fontColor('#AAAAAA')
+            TextInput({ 
+              placeholder: "搜索帖子内容、用户名、吧名",
+              text: this.searchKeyword
+            })
+              .fontColor('#333333')
               .fontSize(16)
+              .backgroundColor(Color.Transparent)
+              .layoutWeight(1)
+              .onChange((value) => {
+                this.searchKeyword = value;
+              })
+              .onSubmit(() => {
+                this.searchPosts();
+              })
+
+            if (this.searchKeyword.length > 0) {
+              Text('✕')
+                .fontColor('#999999')
+                .fontSize(18)
+                .margin({ right: 5 })
+                .onClick(() => {
+                  this.clearSearch();
+                })
+            }
 
             Text("搜索")
               .fontColor('#007AFF')
               .fontSize(16)
               .margin({ right: 10 })
+              .onClick(() => {
+                this.searchPosts();
+              })
           }
           .width('95%')
           .height(40)
@@ -701,10 +1376,21 @@ struct HomePage {
 
           // 中间白框占位
           Column() {
+            // 搜索结果提示
+            if (this.isSearching) {
+              Row() {
+                Text(`找到 ${this.filteredPosts.length} 个结果`)
+                  .fontSize(14)
+                  .fontColor('#666666')
+                  .margin({ left: 16, top: 10, bottom: 5 })
+              }
+              .width('100%')
+            }
 
             Scroll() {
               Column({ space: 16 }) {
-                ForEach(this.posts, (post: PostItem) => {
+                // 根据搜索状态显示不同的帖子列表
+                ForEach(this.isSearching ? this.filteredPosts : this.posts, (post: PostItem) => {
                   Column() {
                     // 帖子头部
                     Row({ space: 10 }) {
@@ -720,8 +1406,8 @@ struct HomePage {
                         .fontWeight(FontWeight.Medium)
                         .margin({ top: 8, bottom: 8 });
 
-                      Text(post.favorited ? `♥ 已收藏` : `♡ 收藏`)
-                        .fontColor(post.favorited ? Color.Red : '#666666')
+                      Text(post.favorited ? `★ 已收藏` : `☆ 收藏`)
+                        .fontColor(post.favorited ? '#ffa500' : '#666666')
                         .fontSize(13)
                         .onClick(() => this.toggleFavorite(post));
                     }
@@ -735,16 +1421,51 @@ struct HomePage {
                         .backgroundColor('#CCCCCC');
 
                       Column({ space: 2 }) {
-                        Text(post.user)
-                          .fontSize(15)
-                          .fontWeight(FontWeight.Medium)
-                          .fontColor(Color.Black);
+                        Row({ space: 8 }) {
+                          Text(post.user)
+                            .fontSize(15)
+                            .fontWeight(FontWeight.Medium)
+                            .fontColor(Color.Black);
+                          
+                          // 只在不是自己的帖子时显示关注按钮
+                          if (post.userId && post.userId !== this.userId) {
+                            Text(post.isFollowing ? '已关注' : '+ 关注')
+                              .fontSize(11)
+                              .fontColor(post.isFollowing ? '#999999' : '#007AFF')
+                              .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                              .border({
+                                width: 1,
+                                color: post.isFollowing ? '#cccccc' : '#007AFF',
+                                radius: 3
+                              })
+                              .backgroundColor(post.isFollowing ? '#f5f5f5' : Color.White)
+                              .onClick(() => this.toggleFollow(post))
+                          }
+                        }
 
                         Text( this.formatTime(post.createTime) )
                           .fontSize(12)
                           .fontColor('#999999');
                       }.alignItems(HorizontalAlign.Start);
+                      
+                      Blank()
+                      
+                      // 如果是当前用户的帖子，显示编辑和删除按钮
+                      if (post.userId === this.userId) {
+                        Row({ space: 15 }) {
+                          Text('编辑')
+                            .fontSize(14)
+                            .fontColor('#007AFF')
+                            .onClick(() => this.openEditDialog(post))
+                          
+                          Text('删除')
+                            .fontSize(14)
+                            .fontColor('#FF3B30')
+                            .onClick(() => this.deletePost(post))
+                        }
+                      }
                     }
+                    .width('100%')
 
                     // 内容
                     Text(post.content)
@@ -794,6 +1515,25 @@ struct HomePage {
                   .alignItems(HorizontalAlign.Start);
 
                 });
+                
+                // 搜索无结果提示
+                if (this.isSearching && this.filteredPosts.length === 0) {
+                  Column({ space: 10 }) {
+                    Text('🔍')
+                      .fontSize(48)
+                      .margin({ top: 50 })
+                    Text('没有找到相关帖子')
+                      .fontSize(16)
+                      .fontColor('#999999')
+                    Text(`关键词: ${this.searchKeyword}`)
+                      .fontSize(14)
+                      .fontColor('#CCCCCC')
+                  }
+                  .width('100%')
+                  .padding({ top: 30, bottom: 30 })
+                  .justifyContent(FlexAlign.Center)
+                  .alignItems(HorizontalAlign.Center)
+                }
               }
               .width('100%')
               .padding({ top: 10, bottom: 20 });
@@ -847,8 +1587,7 @@ struct HomePage {
                   .margin({ top: -190 })
               }
               if (this.isEditing) {
-                TextInput()
-
+                TextInput({ text: this.userName })
                   .width(200)
                   .height(40)
                   .fontSize(22)
@@ -891,7 +1630,7 @@ struct HomePage {
                      const httpRequest: http.HttpRequest = http.createHttp();
 
                      const response = await httpRequest.request(
-                       "http://10.205.218.246:8080/api/updateName",
+                       `${BASE_URL}/api/updateName`,
                        {
                          method: http.RequestMethod.POST,
                          header: { "Content-Type": "application/json" },
@@ -922,22 +1661,49 @@ struct HomePage {
               Row({ space: 30}) {
                 Column() {
                   Text("关注").fontSize(16).fontColor(Color.Gray)
-                  Text("0").fontSize(18).fontColor(Color.Black)
+                  Text(this.followingCount.toString()).fontSize(18).fontColor(Color.Black)
                 }
+                .onClick(() => {
+                  // 跳转到关注列表
+                  router.pushUrl({
+                    url: 'pages/FollowListPage',
+                    params: {
+                      type: 'following',
+                      currentUserId: this.userId,
+                      targetUserId: this.userId
+                    }
+                  });
+                })
 
                 Column() {
                   Text("粉丝").fontSize(16).fontColor(Color.Gray)
-                  Text("0").fontSize(18).fontColor(Color.Black)
+                  Text(this.followerCount.toString()).fontSize(18).fontColor(Color.Black)
                 }
+                .onClick(() => {
+                  // 跳转到粉丝列表
+                  router.pushUrl({
+                    url: 'pages/FollowListPage',
+                    params: {
+                      type: 'follower',
+                      currentUserId: this.userId,
+                      targetUserId: this.userId
+                    }
+                  });
+                })
 
                 Column() {
-                  Button("收藏").fontSize(16).fontColor(Color.White).onClick(() => {
-                    this.currentTab = "favorite";
-                    this.fetchFavoritePosts();
-                  })
-                  Text("0").fontSize(18).fontColor(Color.Black)
-
+                  Text("收藏").fontSize(16).fontColor(Color.Gray)
+                  Text(this.favoriteCount.toString()).fontSize(18).fontColor(Color.Black)
                 }
+                .onClick(() => {
+                  // 跳转到收藏列表
+                  router.pushUrl({
+                    url: 'pages/FavoritePostsPage',
+                    params: {
+                      userId: this.userId
+                    }
+                  });
+                })
               }
               .margin({ top: 10 })
 
@@ -1002,7 +1768,7 @@ struct HomePage {
             Text("所有的吧")
               .fontSize(27)
               .fontColor(Color.Black)
-              .margin({ top: 10, bottom: 10 })
+              .margin({ top: 5, bottom: 0 })
 
             // 使用 Scroll 包裹整个吧列表
             // 使用 Scroll 包裹整个吧列表
@@ -1040,12 +1806,17 @@ struct HomePage {
                   .borderRadius(14)
                   .shadow({ radius: 3, color: '#22000000', offsetX: 0, offsetY: 2 })
                   .onClick(() => {
-
-                    // 跳转到吧详情页逻辑
+                    // 跳转到帖子列表页
+                    router.pushUrl({
+                      url: 'pages/PostListPage',
+                      params: {
+                        baname: forum.baname
+                      }
+                    });
                   })
                 })
               }
-              .padding({ top: 10, left: 16, right: 16, bottom: 16 })
+              .padding({ top: 5, left: 16, right: 16, bottom: 16 })
             }
             .width('100%')
             .height('100%')
@@ -1171,7 +1942,121 @@ struct HomePage {
 
 
         if (this.currentTab === 'message'){
+          Column() {
+            // 顶部导航栏
+            Row() {
+              Text('消息')
+                .fontSize(20)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(Color.White)
+                .layoutWeight(1)
+                .textAlign(TextAlign.Center)
+            }
+            .width('100%')
+            .height(56)
+            .backgroundColor('#00a6ff')
+            .padding({ left: 16, right: 16 })
 
+            // 消息列表
+            if (this.messageUsers.length === 0) {
+              // 空状态
+              Column({ space: 16 }) {
+                Text('📭')
+                  .fontSize(48)
+                Text('暂无消息')
+                  .fontSize(16)
+                  .fontColor('#999999')
+                Text('开始和好友聊天吧')
+                  .fontSize(14)
+                  .fontColor('#CCCCCC')
+              }
+              .width('100%')
+              .layoutWeight(1)
+              .justifyContent(FlexAlign.Center)
+              .backgroundColor('#f5f5f5')
+            } else {
+              // 消息列表
+              List({ space: 1 }) {
+                ForEach(this.messageUsers, (user: MessageUser) => {
+                  ListItem() {
+                    Row({ space: 12 }) {
+                      // 头像
+                      Image(user.avatar ? user.avatar : $r('app.media.head'))
+                        .width(50)
+                        .height(50)
+                        .borderRadius(25)
+
+                      // 消息内容
+                      Column({ space: 4 }) {
+                        Row() {
+                          Text(user.name)
+                            .fontSize(16)
+                            .fontWeight(FontWeight.Medium)
+                            .fontColor('#333333')
+                            .maxLines(1)
+                            .textOverflow({ overflow: TextOverflow.Ellipsis })
+                            .layoutWeight(1)
+                          
+                          // 时间
+                          Text(this.formatMessageTime(user.lastTime))
+                            .fontSize(12)
+                            .fontColor('#999999')
+                        }
+                        .width('100%')
+
+                        Row() {
+                          Text(user.lastMessage || '点击开始聊天')
+                            .fontSize(14)
+                            .fontColor('#999999')
+                            .maxLines(1)
+                            .textOverflow({ overflow: TextOverflow.Ellipsis })
+                            .layoutWeight(1)
+                          
+                          // 未读消息数
+                          if (user.unreadCount && user.unreadCount > 0) {
+                            Text(user.unreadCount.toString())
+                              .fontSize(11)
+                              .fontColor(Color.White)
+                              .backgroundColor('#FF3B30')
+                              .borderRadius(10)
+                              .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                              .textAlign(TextAlign.Center)
+                          }
+                        }
+                        .width('100%')
+                      }
+                      .alignItems(HorizontalAlign.Start)
+                      .layoutWeight(1)
+                    }
+                    .width('100%')
+                    .padding(16)
+                    .backgroundColor(Color.White)
+                    .onClick(() => {
+                      // 进入私聊页面
+                      router.pushUrl({
+                        url: 'pages/ChatPage',
+                        params: {
+                          userId: this.userId,
+                          targetUserId: user.id,
+                          targetUserName: user.name,
+                          targetUserAvatar: user.avatar
+                        }
+                      }).catch((err: Error) => {
+                        console.error('跳转聊天页面失败:', err);
+                        promptAction.showToast({ message: '聊天功能开发中...' });
+                      });
+                    })
+                  }
+                })
+              }
+              .width('100%')
+              .layoutWeight(1)
+              .backgroundColor('#f5f5f5')
+            }
+          }
+          .width('100%')
+          .height('100%')
+          .backgroundColor('#f5f5f5')
         }
 
         if (this.currentTab === 'favorite'){
@@ -1194,8 +2079,8 @@ struct HomePage {
                           .fontWeight(FontWeight.Medium)
                           .margin({ top: 8, bottom: 8 });
 
-                        Text(post.favorited ? `♥ 已收藏` : `♡ 收藏`)
-                          .fontColor(post.favorited ? Color.Red : '#666666')
+                        Text(post.favorited ? `★ 已收藏` : `☆ 收藏`)
+                          .fontColor(post.favorited ? '#ffa500' : '#666666')
                           .fontSize(13)
                           .onClick(() => this.toggleFavorite(post));
                       }
@@ -1289,13 +2174,17 @@ struct HomePage {
 
       }
       .width('100%')
+      .height('calc(100% - 70px)')
       .alignItems(HorizontalAlign.Center)
+      .justifyContent(FlexAlign.Start)
 
+      // 底部菜单栏
       Row() {
         Column() {
           Text("首页").fontSize(27).fontColor(this.currentTab === 'home' ? '#007AFF' : Color.Black)
             .onClick(() => {
               this.currentTab = 'home'
+              this.showCommentPanel = false
               this.fetchPosts()
             })
         }
@@ -1304,6 +2193,7 @@ struct HomePage {
           Text("进吧").fontSize(27).fontColor(this.currentTab === 'forum' ? '#007AFF' : Color.Black)
             .onClick(() => {
               this.currentTab = 'forum'
+              this.showCommentPanel = false
             })
         }
 
@@ -1311,20 +2201,27 @@ struct HomePage {
           Text("发布").fontSize(27).fontColor(this.currentTab === 'post' ? '#007AFF' : Color.Black)
             .onClick(() => {
               this.currentTab = 'post'
+              this.showCommentPanel = false
             })
         }
 
         Column() {
           Text("消息").fontSize(27).fontColor(this.currentTab === 'message' ? '#007AFF' : Color.Black)
-            .onClick(() => {
-              this.currentTab = 'massage'
+            .onClick(async () => {
+              this.currentTab = 'message'
+              this.showCommentPanel = false
+              // 切换到消息页面时，加载关注的好友列表
+              await this.loadMessageUsers()
             })
         }
 
         Column() {
           Text("我的").fontSize(27).fontColor(this.currentTab === 'profile' ? '#007AFF' : Color.Black)
-            .onClick(() => {
+            .onClick(async () => {
               this.currentTab = 'profile'
+              this.showCommentPanel = false
+              // 切换到个人中心时，重新加载关注和粉丝数据
+              await this.loadFollowStats()
             })
         }
       }
@@ -1332,7 +2229,8 @@ struct HomePage {
       .height(70)
       .backgroundColor('#F5F5F5')
       .justifyContent(FlexAlign.SpaceAround)
-      .margin({top:850})
+      .position({ x: 0, y: '100%' })
+      .translate({ y: '-100%' })
 
 
       if (this.showShare) {
@@ -1385,6 +2283,56 @@ struct HomePage {
         .borderRadius({ topLeft: 16, topRight: 16 })
         .position({ y: '65%' })   // 控制面板高度
       }
+      
+      // 编辑帖子对话框
+      if (this.showEditDialog) {
+        Stack() {
+          // 遮罩
+          Rect()
+            .fill('#66000000')
+            .width('100%')
+            .height('100%')
+            .onClick(() => this.showEditDialog = false)
+
+          // 编辑面板
+          Column({ space: 20 }) {
+            Text('编辑帖子')
+              .fontSize(20)
+              .fontWeight(FontWeight.Bold)
+
+            TextArea({ placeholder: '请输入帖子内容...', text: this.editContent })
+              .width('100%')
+              .height(150)
+              .onChange((value) => this.editContent = value)
+
+            Text('选择吧：' + this.editBaname)
+              .fontSize(14)
+              .fontColor('#666')
+
+            Row({ space: 10 }) {
+              Button('取消')
+                .width('45%')
+                .backgroundColor('#EEEEEE')
+                .fontColor('#333')
+                .onClick(() => this.showEditDialog = false)
+
+              Button('保存')
+                .width('45%')
+                .backgroundColor('#007AFF')
+                .onClick(() => this.saveEdit())
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.SpaceAround)
+          }
+          .padding(20)
+          .backgroundColor(Color.White)
+          .borderRadius(12)
+          .width('85%')
+        }
+        .width('100%')
+        .height('100%')
+      }
+      
       if (this.showCommentPanel) {
         Stack() {
 
@@ -1429,12 +2377,11 @@ struct HomePage {
               } else {
                 // 评论列表
                 Scroll() {
-                  Column({ space: 12 }) {
+                  Column({ space: 0 }) {
                     ForEach(this.comments, (item: CommentItem) => {
                       this.CommentItemView(item)
                     })
                   }
-                  .padding(16)
                 }
                 .layoutWeight(1)
               }
@@ -1445,7 +2392,9 @@ struct HomePage {
             // —— 输入区 ——
             Row({ space: 8 }) {
               TextInput({
-                placeholder: '说点什么吧…'
+                placeholder: '说点什么吧…',
+                text: this.commentInput,
+                controller: this.commentInputController
               })
                 .onChange((value: string) => {
                   this.commentInput = value
@@ -1466,23 +2415,24 @@ struct HomePage {
                 })
             }
             .padding(12)
-            .border({ width: { top: 1 }, color: '#eee' })
+            .backgroundColor(Color.White)
 
           }
           .width('100%')
-          .height('90%')
           .backgroundColor(Color.White)
           .borderRadius({ topLeft: 16, topRight: 16 })
           .onClick(() => {}) // ⭐ 阻断点击穿透
           .align(Alignment.Bottom)
 
         }
+        .width('100%')
+        .height('calc(100% - 70px)')
       }
 
 
     }
     .width('100%')
-    .height('80%')
+    .height('100%')
 
   }
 

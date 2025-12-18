@@ -3,6 +3,7 @@ import router from '@ohos.router';
 import http from '@ohos.net.http';
 import prompt from '@system.prompt';
 import util from '@ohos.util';
+import { BASE_URL } from './ip';
 
 interface RegisterResponse {
   success: boolean;
@@ -37,7 +38,7 @@ struct RegisterPage {
     const httpRequest = http.createHttp();
     try {
       const response: http.HttpResponse = await httpRequest.request(
-        `$\{BASE_URL}/api/register`,
+        `${BASE_URL}/api/register`,
         {
           method: http.RequestMethod.POST,
           header: { "Content-Type": "application/json" },
