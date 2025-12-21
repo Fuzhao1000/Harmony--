@@ -729,6 +729,8 @@ struct PostListPage {
   PostItemView(post: PostItem) {
     Column() {
       Row({ space: 12 }) {
+
+
         Image($r('app.media.head'))
           .width(40)
           .height(40)

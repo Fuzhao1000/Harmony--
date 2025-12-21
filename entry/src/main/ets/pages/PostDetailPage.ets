@@ -29,7 +29,7 @@ interface CommentItem {
   liked?: boolean
 }
 
-interface ApiResponse<T = any> {
+interface ApiResponse<T> {
   success: boolean
   message?: string
   data?: T
@@ -85,9 +85,8 @@ struct PostDetailPage {
       let text = typeof resp.result === "string"
         ? resp.result
         : new util.TextDecoder("utf-8").decode(resp.result as Uint8Array);
-      
-      const data = JSON.parse(text) as ApiResponse;
-      
+
+      const data = JSON.parse(text) as ApiResponse<CommentItem[]>;
       console.log('评论数据:', JSON.stringify(data));
       
       if (data.success && data.data) {
@@ -164,8 +163,8 @@ struct PostDetailPage {
         : new util.TextDecoder("utf-8").decode(resp.result as Uint8Array);
       
       console.log('响应数据:', text);
-      
-      const data = JSON.parse(text) as ApiResponse;
+
+      const data = JSON.parse(text) as ApiResponse<PostItem[]>;
       
       if (data.success) {
         promptAction.showToast({ message: '评论成功' });
