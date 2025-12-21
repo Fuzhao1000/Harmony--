@@ -2,6 +2,7 @@ import router from '@ohos.router';
 import file from '@ohos.file.picker';
 import * as picker from '@ohos.file.picker';
 import photoAccessHelper from '@ohos.file.photoAccessHelper';
+
 import { BusinessError } from '@ohos.base';
 import { common } from '@kit.AbilityKit';
 import {loadUserInfo} from '../pages/LoginPage';
@@ -24,7 +25,7 @@ interface PostItem {
   userId?: number
   createTime: number
   content: string
-  image?: string
+  image: string
   likes: number
   comments: number
   liked?: boolean;
@@ -212,6 +213,12 @@ interface ConversationsResponse {
   message?: string;
 }
 
+interface PhotoResponse{
+  message: string;
+  success: boolean;
+  url:string;
+}
+
 @Entry
 @Component
 struct HomePage {
@@ -380,8 +387,94 @@ struct HomePage {
     .backgroundColor(Color.White)
   }
 
+  async  ChangeImage(
+  photoUri: string,
+  context: Context
+): Promise<string> {
+    let tempFilePath: string = '';
+    let srcFile: fs.File | null = null;
+
+    try {
+      // 1. 创建临时文件路径
+      const cacheDir = context.cacheDir;
+      tempFilePath = `${cacheDir}/temp_upload_${Date.now()}.jpg`;
+
+      // 2. 直接打开相册返回的 URI（系统已授权临时读权限！）
+      srcFile = fs.openSync(photoUri, fs.OpenMode.READ_ONLY);
+
+      // 3. 创建目标文件（用 TRUNCATE 清空覆盖）
+      const destFile = fs.openSync(tempFilePath,
+        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY
+      );
+
+      try {
+        // 4. 复制文件内容（大文件安全）
+        const bufferSize = 64 * 1024;
+        const buffer = new ArrayBuffer(bufferSize);
+        let readLen = 0;
+
+        while ((readLen = await fs.read(srcFile.fd, buffer)) > 0) {
+          const data = new Uint8Array(buffer, 0, readLen);
+          await fs.write(destFile.fd, data.buffer);
+        }
+      } finally {
+        fs.closeSync(destFile);
+      }
+
+      // 5. 读取临时文件用于上传
+      const uploadFile = await fs.open(tempFilePath, fs.OpenMode.READ_ONLY);
+      const stat = await fs.stat(tempFilePath);
+      const fileBuffer = new ArrayBuffer(stat.size);
+      await fs.read(uploadFile.fd, fileBuffer);
+      await fs.close(uploadFile);
+
+      // 6. 构造 multipart body（保持你的逻辑）
+      const boundary = '----WebKitFormBoundary' + Date.now();
+      const encoder = new util.TextEncoder();
+
+      const fileName = photoUri.substring(photoUri.lastIndexOf('/') + 1) || 'image.jpg';
+      const mimeType = fileName.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+
+      const header = encoder.encode(
+        `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+          `Content-Type: ${mimeType}\r\n\r\n`
+      );
+
+      const footer = encoder.encode(`\r\n--${boundary}--\r\n`);
+
+      const body = new Uint8Array(header.byteLength + fileBuffer.byteLength + footer.byteLength);
+      body.set(new Uint8Array(header), 0);
+      body.set(new Uint8Array(fileBuffer), header.byteLength);
+      body.set(new Uint8Array(footer), header.byteLength + fileBuffer.byteLength);
+
+      // 7. 上传
+      const httpRequest = http.createHttp();
+      const response = await httpRequest.request(`${BASE_URL}/upload/image`, {
+        method: http.RequestMethod.POST,
+        header: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        extraData: body.buffer
+      });
+      httpRequest.destroy();
+
+      if (response.responseCode !== 200) {
+        throw new Error(`上传失败：${response.responseCode}`);
+      }
+
+      const result = JSON.parse(response.result as string) as PhotoResponse;
+      if (result.success && result.url) {
+        return result.url;
+      }
+      throw new Error('上传失败');
+
+    } finally {
+      if (srcFile) fs.closeSync(srcFile);
+      if (tempFilePath) await fs.unlink(tempFilePath).catch(() => {});
+    }
+}
   async pickImageFromGallery() {
     try {
+
       const photoPicker = new photoAccessHelper.PhotoViewPicker();
       // 打开相册，等待用户选择
       const selectResult = await photoPicker.select({
@@ -394,8 +487,13 @@ struct HomePage {
         const uri = selectResult.photoUris[0];
         console.log("选择的图片地址：" + uri);
 
-        // 更新头像显示
-        this.headImage = uri;
+        const newImageUrl = await this.ChangeImage(uri, getContext(this));
+        console.log("复制的图片地址：" + newImageUrl);
+
+        //this.headImage = `${BASE_URL}${newImageUrl}`;
+        this.headImage =`http://10.205.218.246:8080/images/test.png`;
+          console.log("pingjie：" + this.headImage);
+
       }
     } catch (err) {
       const error = err as BusinessError;
@@ -418,13 +516,16 @@ struct HomePage {
         console.log("选择的帖子图片地址：" + uri);
 
         // 更新帖子图片显示
-        this.selectedImage = uri;
+        this.selectedImage = `http://10.205.218.246:8080/images/test.png`;
       }
     } catch (err) {
       const error = err as BusinessError;
       console.error(`选图失败：${error.code} - ${error.message}`);
     }
   }
+
+
+
 
   private async loadUserNameFromDB() {
     this.loading = true;
@@ -734,6 +835,20 @@ struct HomePage {
       const userInfo = await loadUserInfo(currentContext);
       const userId = parseInt(userInfo.id, 10) || 0;
 
+      let imageUrl = ``;
+
+      if (this.selectedImage) {
+        try {
+          imageUrl = `http://10.205.218.246:8080/images/test.png`;
+          console.log('图片上传成功:', imageUrl);
+        } catch (e) {
+          console.error('图片上传失败完整错误：', e);
+          Prompt.showToast({ message: '图片上传失败' });
+          return; // ❗图片失败就不发帖
+        }
+      }
+
+      // ⭐ 2️⃣ 用「图片 URL」发帖
       const postData: PostItem = {
         id: this.generatePostId(),
         user: this.userName,
@@ -741,9 +856,9 @@ struct HomePage {
         content: this.content,
         baname: this.selectedBa,
         createTime: Date.now(),
-        image: this.selectedImage,
-        likes:0,
-        comments:0
+        image: imageUrl,   // ⭐ 关键改动
+        likes: 0,
+        comments: 0
       };
 
       console.log("提交数据：", JSON.stringify(postData));
@@ -956,7 +1071,7 @@ struct HomePage {
         return p;
       }));
 
-     // console.log("加载帖子成功：", JSON.stringify(this.posts, null, 2));
+     console.log("加载帖子成功：", JSON.stringify(this.posts, null, 2));
      // console.log("eeeee：", JSON.stringify(favSet, null, 2));
     } catch (err) {
       console.error("获取帖子失败", err);
@@ -1299,8 +1414,6 @@ struct HomePage {
     this.fetchComments(String(postId))
   }
 
-
-
   aboutToAppear() {
     this.loadUserNameFromDB();
     this.fetchPosts();
@@ -1414,12 +1527,22 @@ struct HomePage {
 
                     // 用户信息
                     Row({ space: 2 }) {
-                      Image($r('app.media.head'))
-                        .width(40)
-                        .height(40)
-                        .borderRadius(20)
-                        .backgroundColor('#CCCCCC');
-
+                      if (this.headImage.startsWith('http') || this.headImage.startsWith('https')) {
+                        // 网络图片
+                        Image(this.headImage)
+                          .width(40)
+                          .height(40)
+                          .borderRadius(20)
+                          .backgroundColor('#CCCCCC');
+                      }
+                      else
+                      {
+                        Image($r('app.media.head'))
+                          .width(40)
+                          .height(40)
+                          .borderRadius(20)
+                          .backgroundColor('#CCCCCC');
+                      }
                       Column({ space: 2 }) {
                         Row({ space: 8 }) {
                           Text(post.user)
@@ -1474,12 +1597,16 @@ struct HomePage {
                       .margin({ top: 8, bottom: 8 });
 
                     // 图片
-                    if (post.image) {
-                      Image($r(post.image))
-                        .width('100%')
-                        .height(180)
-                        .borderRadius(12)
-                        .objectFit(ImageFit.Cover);
+                    if (post.image && post.image.startsWith('http')) {
+                      Image(post.image)
+                        .width(200)
+                        .height(200)
+                        .objectFit(ImageFit.Cover)
+                        .onError(() => {
+                          console.error('图片加载失败:', post.image);
+                        })
+                    } else {
+                      // 没图就不渲染
                     }
 
                     // 操作栏
@@ -1558,33 +1685,54 @@ struct HomePage {
           Column() {
 
             Column() {
-              if (this.isEditing){
-                Row({ space: 10 }) {  // 水平并排，间距 10
-                  Image($r(this.headImage))  // 显示当前头像（不再有 onClick）
-                    .width(100)
-                    .height(100)
-                    .borderRadius(50)
+              if (this.isEditing) {
+                Row({ space: 10 }) {
+                  // 关键修改：动态判断 headImage 是网络URL还是本地资源
+                  if (this.headImage.startsWith('http') || this.headImage.startsWith('https')) {
+                    // 网络图片
+                    Image(this.headImage)
+                      .width(100)
+                      .height(100)
+                      .borderRadius(50)
+                      .objectFit(ImageFit.Cover)  // 推荐加上，防止变形
+                      .alt($r('app.media.head'))  // 加载失败时显示默认头像
 
-                  Button("修改头像")  // 新按钮
+                  } else {
+                    // 本地资源（初始默认头像或 $r 路径）
+                    Image($r(this.headImage))
+                      .width(100)
+                      .height(100)
+                      .borderRadius(50)
+                      .objectFit(ImageFit.Cover)
+                  }
+
+                  Button("修改头像")
                     .width(80)
                     .height(40)
                     .borderRadius(8)
                     .fontSize(10)
                     .fontColor(Color.White)
-                    .backgroundColor("#007AFF")  // 蓝色背景，可自定义
+                    .backgroundColor("#007AFF")
                     .onClick(async () => {
-                      await this.pickImageFromGallery();  // 点击调用选择函数
+                      await this.pickImageFromGallery();
                     })
+
                 }
-                .margin({ top: -190 })  // 整体上移
-              }
-              else
-              {
-                Image($r('app.media.head'))  // 头像资源
-                  .width(100)
-                  .height(100)
-                  .borderRadius(50)  // 圆形
-                  .margin({ top: -190 })
+                .margin({ top: -190 })
+              } else {
+                if (this.headImage.startsWith('http') || this.headImage.startsWith('https')) {
+                  Image(this.headImage)
+                    .width(100)
+                    .height(100)
+                    .borderRadius(50)
+                    .objectFit(ImageFit.Cover)
+                } else {
+                  Image($r(this.headImage))
+                    .width(100)
+                    .height(100)
+                    .borderRadius(50)
+                    .objectFit(ImageFit.Cover)
+                }
               }
               if (this.isEditing) {
                 TextInput({ text: this.userName })
@@ -2437,7 +2585,6 @@ struct HomePage {
   }
 
 }
-
 
 @Builder
 function ShareItem(name: string, icon: Resource, onClick?: () => void) {
