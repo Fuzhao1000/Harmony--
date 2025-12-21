@@ -165,6 +165,7 @@ public class PostController {
             m.put("userId", p.getUserId());  // ★ 添加userId字段用于前端权限判断
             m.put("user", userIdToNameMap.getOrDefault(p.getUserId(), "未知用户"));  // 通过userId查询用户名
             m.put("content", p.getContent());
+            m.put("image", p.getImage());
             m.put("baname", p.getBaname());
             m.put("createTime", p.getCreateTime());
             m.put("likes", p.getLikes());
@@ -225,6 +226,7 @@ public class PostController {
             m.put("userId", p.getUserId());  // ★ 添加userId字段用于前端权限判断
             m.put("user", userIdToNameMap.getOrDefault(p.getUserId(), "未知用户"));  // 通过userId查询用户名
             m.put("content", p.getContent());
+            m.put("image", p.getImage());
             m.put("baname", p.getBaname());
             m.put("createTime", p.getCreateTime());
             m.put("likes", p.getLikes());
@@ -276,6 +278,7 @@ public class PostController {
             m.put("userId", p.getUserId());  // ★ 添加userId字段用于前端权限判断
             m.put("user", userIdToNameMap.getOrDefault(p.getUserId(), "未知用户"));
             m.put("content", p.getContent());
+            m.put("image", p.getImage());
             m.put("baname", p.getBaname());
             m.put("createTime", p.getCreateTime());
             m.put("likes", p.getLikes());
