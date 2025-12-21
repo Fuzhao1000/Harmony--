@@ -7,9 +7,9 @@ import jakarta.persistence.*;
 public class Post {
 
     @Id
-
     private Long id;
-    private String user;
+    
+    private Long userId;     // 用户ID（逻辑外键）
     private String content;
     private String baname;   // 吧名（用于前端匹配图片）
     private Long createTime;
@@ -27,12 +27,12 @@ public class Post {
         this.id = id;
     }
 
-    public String getUser() {
-        return user;
+    public Long getUserId() {
+        return userId;
     }
 
-    public void setUser(String user) {
-        this.user = user;
+    public void setUserId(Long userId) {
+        this.userId = userId;
     }
 
 

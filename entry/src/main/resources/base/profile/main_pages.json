@@ -4,7 +4,11 @@
     "pages/HomePage",
     "pages/RegisterPage",
     "pages/LoginPage",
-    "pages/personalsetting"
+    "pages/personalsetting",
+    "pages/PostListPage",
+    "pages/FollowListPage",
+    "pages/FavoritePostsPage",
+    "pages/ChatPage"
   ]
 
 }

@@ -7,9 +7,10 @@ import preferences from '@ohos.data.preferences';
 
 import { BASE_URL } from '../pages/ip';
 
-interface UserInfo {
+export interface UserInfo {
   id: string;  // 存储后为字符串
   name: string;
+  username?: string;
 }
 
 async function getUserStorage(context: common.UIAbilityContext): Promise<preferences.Preferences> {
